@@ -1,59 +1,56 @@
 # Release Checklist
 
-Use this checklist before creating a stable GitHub Release.
+## Core creation
 
-## Model behavior
-
-- [ ] Root part active requirement produces a clear error when violated.
-- [ ] Empty selection rejected.
-- [ ] Mixed selection rejected.
-- [ ] Edge mode accepts the required SpaceClaim edge types.
-- [ ] Face mode tested if the release claims Face validation.
-- [ ] Multiple selected items create exactly one Named Selection.
-- [ ] Existing groups are not overwritten.
-- [ ] Gap-aware numbering verified.
-- [ ] Case-insensitive existing names verified.
+- [x] Root-part requirement retained.
+- [x] Empty/mixed selection rejected.
+- [x] Multiple Edge objects supported.
+- [x] Existing weld groups not intentionally overwritten by normal Create.
+- [x] Gap-aware, case-insensitive numbering retained.
+- [x] `MAX_PAIR = 99999999` retained.
 
 ## Window lifecycle
 
-- [ ] First Run opens one window.
-- [ ] Repeated Run while open does not create a duplicate.
-- [ ] Close with X.
-- [ ] Run again reopens the window.
-- [ ] Selection mode persists if claimed.
-- [ ] Auto Highlight state persists if claimed.
+- [x] UI created through host `BeginInvoke`.
+- [x] Duplicate launch suppression retained.
+- [x] Close/reopen behavior retained.
 
-## Highlighting
+## Visualization
 
-- [ ] Secondary Selection highlights only weld geometry.
-- [ ] Clear Highlight removes Secondary Selection.
-- [ ] Highlight Current Pair shows only the intended pair.
-- [ ] Create side `a` with Auto ON highlights the available part of that pair.
-- [ ] Create side `b` with Auto ON highlights both sides of that pair.
-- [ ] Auto OFF does not prevent successful Create.
-- [ ] Highlight All Weld Groups remains functional.
-- [ ] Create remains successful if highlighting fails.
+- [x] A = Secondary Selection.
+- [x] B = red temporary Graphic.
+- [x] Current pair / all groups / Auto Highlight use A/B colors.
+- [x] Clear Highlight removes A and B visualization.
+- [x] Orange QA problem overlay available.
 
-## Diagnostics
+## QA / repair
 
-- [ ] Log file created in `%TEMP%`.
-- [ ] Creation and rename events logged.
-- [ ] Errors include useful diagnostics.
-- [ ] Log name/version matches the release version.
+- [x] Validate All.
+- [x] Problem-only filter and navigation.
+- [x] Pair highlight and zoom.
+- [x] CSV export.
+- [x] Replace/Add/Remove A/B.
+- [x] Create Missing A/B.
+- [x] Conflict highlight.
+- [x] Post-repair group verification.
 
 ## Packaging
 
-- [ ] Version in window title updated.
-- [ ] Version in source header updated.
-- [ ] README updated.
-- [ ] CHANGELOG updated.
-- [ ] Validation matrix distinguishes real tests from static tests.
-- [ ] No logs, temporary files, `__pycache__`, or editor files included.
-- [ ] ZIP extracts cleanly.
+- [x] Source header = v0.12.0 STABLE.
+- [x] Window titles = v0.12.0.
+- [x] Log file = `%TEMP%\\SpaceClaim_Weld_Namer_v012.log`.
+- [x] README / README_RU / CHANGELOG / RELEASE_NOTES updated.
+- [x] Real validation distinguished from static checks.
+- [x] GPL-3.0 license included.
+- [x] Development logs and temporary reports excluded from repository root.
+- [x] Screenshots from real v0.12 validation included.
 
-## GitHub publication
+## GitHub release
 
-- [ ] Repository description added.
-- [ ] Topics/tags added (`ansys`, `spaceclaim`, `ironpython`, `fea`, `welding`, `automation`, `named-selection`).
-- [ ] License decision made before describing the project as open source.
-- [ ] Stable tag created only from a real-validated build.
+Recommended metadata:
+
+```text
+Tag:    v0.12.0
+Target: main
+Title:  SpaceClaim Weld Namer v0.12.0
+```

@@ -1,56 +1,68 @@
-# Validation Matrix
+# Validation Matrix — v0.12.0
 
 Target environment:
 
-- SpaceClaim 2021 R1
+- ANSYS SpaceClaim 2021 R1
 - Script API V19
-- Built-in IronPython 2.7
+- built-in IronPython 2.7
 
-The project distinguishes tests performed on the **real target installation** from developer/static checks.
+This document separates **real SpaceClaim validation** from developer/static checks.
 
-## v0.10.0 STABLE — confirmed on the real installation
+## Real target installation — confirmed
 
-| Test | Result |
+| Function | Status |
 |---|---|
-| Modeless WinForms window starts on SpaceClaim UI thread | PASS |
-| Close window -> Run script again -> window reopens | PASS |
-| Repeated Run while queued/open does not create duplicate windows | PASS |
+| Modeless WinForms launched through SpaceClaim UI thread | PASS |
+| Window close -> script Run -> reopen | PASS |
+| Duplicate-window suppression | PASS |
 | `NamedSelection.GetGroups(root)` | PASS |
-| Edges accepts `DesignEdgeGeneral` | PASS |
-| Multiple selected edges stored in one Named Selection | PASS |
-| Sequential `wNa / wNb` creation and continuation | PASS |
-| Gap-aware next-name calculation | PASS |
-| Existing groups are not overwritten by normal creation | PASS |
-| Secondary Selection highlights exact weld geometry | PASS |
-| Highlight All Weld Groups | PASS |
-| Auto highlight current pair after Create | PASS |
-| Create side `a` -> available part of current pair highlighted | PASS |
-| Create side `b` -> both sides of current pair highlighted | PASS |
+| Sequential `wNa / wNb` creation | PASS |
+| Gap-aware and case-insensitive numbering | PASS |
+| Multiple selected Edge objects in one Named Selection | PASS |
+| Normal Create does not intentionally overwrite existing group | PASS |
+| A-side Secondary Selection visualization | PASS |
+| B-side red `Display.Graphic` visualization | PASS |
 | Highlight Current Pair | PASS |
-| Auto Highlight can be disabled without breaking Create | PASS |
-| Close/reopen preserves Auto Highlight state | PASS |
+| Highlight All Weld Groups | PASS |
+| Clear Highlight clears A/B visualization | PASS |
+| QA / Repair Manager opens and scans weld groups | PASS |
+| QA table and selected-pair navigation | PASS |
+| Orange QA problem visualization | PASS |
+| Repair workflow on the tested Edge-based model | PASS — user reported successful operation |
+| Global A/B highlight on 104 groups / 346 geometry items | PASS — observed in validation session |
 
-## Earlier v0.7 color experiment
+## API diagnostics confirmed on the target installation
 
-| Observation | Result |
+The reflection probes confirmed these relevant V19 capabilities before implementation:
+
+- `CurvePrimitive.Create(ITrimmedCurve)`;
+- `Graphic.Create(...)` and `GraphicStyle.LineColor` / `LineWidth`;
+- writable `Window.Rendering` and `Window.RefreshRendering()`;
+- `NamedSelection.Replace(String, ISelection, ISelection, ICommandInfo)`;
+- `NamedSelection.Delete(String[])`;
+- `Group.Members` readable but not writable.
+
+A real test also established that reading `Window.Rendering` while the custom-rendering slot is empty can raise a null-reference exception, while direct assignment plus `RefreshRendering()` works. The stable code therefore avoids that getter.
+
+## Developer/static checks
+
+- Python source parses successfully with CPython's parser for syntax compatible with the file.
+- Stable package contains no development logs or temporary files.
+- `MAX_PAIR` remains `99999999`.
+- normal `create_next()` logic retains the established create/rename path.
+- README, version, changelog and UI titles are synchronized to v0.12.0.
+
+## Not claimed as real-validated in v0.12.0
+
+| Function | Status |
 |---|---|
-| Color API accepted edge selections without exception | OBSERVED |
-| Log recorded color calls | OBSERVED |
-| Required per-edge visual result | FAILED |
-| Decision | CAD color abandoned for weld visualization |
+| Full Faces workflow including repair | Implemented, not independently confirmed in the recorded target test |
+| SpaceClaim versions other than 2021 R1 | Not validated |
+| Script publication as a toolbar Tool | Not validated |
+| Keyboard shortcut / Ctrl+W | Not implemented |
 
-## Not yet confirmed on the real installation
+## QA interpretation
 
-| Test | Status |
-|---|---|
-| Faces mode end-to-end | TODO |
-| Publish Script as Tool | TODO |
-| Shortcut conflict check and hotkey assignment | TODO |
+The QA Manager is a **model-preparation screening tool**. A `CHECK` or `ERROR` flag identifies suspicious Named Selection structure or geometry relationships. It is not an engineering acceptance criterion for weld strength or weld quality.
 
-## Behavioral invariants
-
-- Highlight failure must not delete or invalidate a successfully created Named Selection.
-- `NamedSelection.Create` is executed once on the normal path; no mutation retry with alternative signatures.
-- The next name is recalculated from root groups on every Create/Check operation.
-- Existing matching weld groups are never intentionally overwritten by normal creation.
-- Visualization uses Secondary Selection, not permanent CAD color modification.
+Object-count mismatch is informational because topological partitioning may differ between otherwise corresponding weld sides. The 10% length/area tolerance is a configurable screening threshold, not a code requirement.

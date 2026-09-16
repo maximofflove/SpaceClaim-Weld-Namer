@@ -1,42 +1,50 @@
-# SpaceClaim Weld Namer v0.10.0
+# SpaceClaim Weld Namer v0.12.0
 
-**Status:** Stable  
-**Target:** ANSYS SpaceClaim 2021 R1 / Script API V19 / IronPython 2.7
+**Stable release — 16 September 2026**
 
-v0.10.0 was promoted to stable after successful testing on the real target installation.
+v0.12.0 turns SpaceClaim Weld Namer from a sequential naming helper into a complete weld Named Selection preparation and QA workflow for SpaceClaim 2021 R1.
 
-## New in v0.10
+## Main additions
 
-- Auto highlight of the current weld pair after **Create Next**.
-- Manual **Highlight Current Pair**.
-- Manual **Highlight All Weld Groups**.
-- **Clear Highlight**.
-- Auto Highlight state retained after closing and reopening the tool window in the same SpaceClaim session.
-- Current pair is reported by **Check Next Name**.
-- Log file: `%TEMP%\SpaceClaim_Weld_Namer_v010.log`.
+- A/B color separation: **A blue, B red** without changing CAD colors.
+- Named Selection QA table with **OK / CHECK / ERROR** screening.
+- Orange global problem highlighting.
+- Problem navigation, selected-pair highlight and zoom.
+- CSV QA export.
+- Controlled repair of selected weld groups:
+  - Replace A/B;
+  - Add to A/B;
+  - Remove from A/B;
+  - Create Missing A/B;
+  - Highlight Conflict.
+- Repair operations verify the resulting group contents and refresh QA.
 
-## Unchanged core
+## Validation
 
-The previously validated mutation path remains unchanged:
+Validated on the real target environment:
+
+- ANSYS SpaceClaim 2021 R1;
+- Script API V19;
+- IronPython 2.7;
+- large Edge-based weld model;
+- 104 weld groups / 346 geometry items exercised in the recorded global-highlight validation session.
+
+The normal Create Next mutation chain remains unchanged from the validated baseline.
+
+## Log
 
 ```text
-Selection.GetActive()
--> NamedSelection.GetGroups(root)
--> NamedSelection.Create(selection, Selection.Empty())
--> verify exactly one new group
--> NamedSelection.Rename(temporary_name, target)
+%TEMP%\SpaceClaim_Weld_Namer_v012.log
 ```
 
-Secondary Selection remains the visualization mechanism; CAD colors are not modified.
+## License
 
-## Validation note
-
-The Edges workflow and the new v0.10 pair-highlighting controls were confirmed on the real SpaceClaim 2021 R1 installation. `Faces` mode is implemented but remains unvalidated at the time of this release.
-
-## Distribution model
-
-SpaceClaim Weld Namer is released as free and open-source software under GNU GPL v3.0. Optional project support is available through Boosty: https://boosty.to/ansys2021/donate. Donations do not unlock additional features.
+GNU GPL v3.0.
 
 ## Companion project
 
-For downstream ANSYS Mechanical weld-connection work, see **MPC184 Viewer**: https://github.com/maximofflove/MPC184Viewer
+MPC184 Viewer: https://github.com/maximofflove/MPC184Viewer
+
+## Optional support
+
+https://boosty.to/ansys2021/donate

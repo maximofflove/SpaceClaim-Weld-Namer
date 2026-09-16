@@ -1,6 +1,6 @@
 # Python Script, API Version = V19
 # -*- coding: utf-8 -*-
-# SpaceClaim Weld Namer 0.10 STABLE - IronPython 2.7, SpaceClaim script editor.
+# SpaceClaim Weld Namer 0.12.0 STABLE - IronPython 2.7, SpaceClaim script editor.
 import re
 import sys
 import traceback
@@ -82,6 +82,279 @@ def log_creation_signatures():
 
 
 
+
+def _item_type_names(item):
+    metadata = item.GetType()
+    return [metadata.Name] + [t.Name for t in metadata.GetInterfaces()]
+
+def _is_weld_face_item(item):
+    names = _item_type_names(item)
+    return any(name in ('DesignFace', 'IDesignFace', 'DesignFaceGeneral') for name in names)
+
+def _is_weld_edge_item(item):
+    names = _item_type_names(item)
+    return any(name in ('DesignEdge', 'IDesignEdge', 'DesignEdgeGeneral') for name in names)
+
+def weld_group_geometry_by_side(root):
+    # Return exact Named Selection geometry split by suffix.  Side A keeps the
+    # proven SpaceClaim Secondary Selection.  Side B is rendered separately by
+    # a temporary red Display.Graphic, so CAD appearance is not modified.
+    a_names, a_items = [], []
+    b_names, b_items = [], []
+    for group in all_groups(root):
+        name = str(group.Name)
+        match = re.match(r'^w[1-9][0-9]*([ab])$', name.lower())
+        if match is None:
+            continue
+        sel = Selection.CreateByGroups(name)
+        if sel is None:
+            log_event('HIGHLIGHT WARNING: %s returned null selection' % name)
+            continue
+        group_items = list(sel.Items)
+        if not group_items:
+            log_event('HIGHLIGHT WARNING: %s contains no selectable geometry' % name)
+            continue
+        if match.group(1) == 'a':
+            a_names.append(name)
+            a_items.extend(group_items)
+        else:
+            b_names.append(name)
+            b_items.extend(group_items)
+    return a_names, a_items, b_names, b_items
+
+def _graphics_equal(left, right):
+    if left is right:
+        return True
+    if left is None or right is None:
+        return False
+    try:
+        return bool(left.Equals(right))
+    except Exception:
+        return False
+
+def _windows_equal(left, right):
+    if left is right:
+        return True
+    if left is None or right is None:
+        return False
+    try:
+        return bool(left.Equals(right))
+    except Exception:
+        return False
+
+def _edge_key(edge):
+    try:
+        return 'M:' + str(edge.Moniker)
+    except Exception:
+        try:
+            return 'E:' + str(edge.ExportIdentifier)
+        except Exception:
+            return 'O:' + str(edge)
+
+def _curve_primitive_for_edge(edge):
+    # API V19 reflection on the user's installation confirms:
+    #   DesignEdge.Shape -> Modeler.Edge
+    #   Modeler.Edge implements Geometry.ITrimmedCurve
+    #   Display.CurvePrimitive.Create(ITrimmedCurve)
+    candidates = []
+    try:
+        candidates.append(edge.Shape)
+    except Exception:
+        pass
+    candidates.append(edge)
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        try:
+            return CurvePrimitive.Create(candidate)
+        except Exception:
+            pass
+    return None
+
+def red_primitives_from_items(items):
+    # Edges are drawn directly.  For a face Named Selection, draw the exact
+    # boundary edges of that face in red.  This avoids recoloring the parent body.
+    primitives = []
+    seen_edges = set()
+    skipped = 0
+    for item in items:
+        edges = []
+        try:
+            if _is_weld_face_item(item):
+                edges = list(item.Edges)
+            elif _is_weld_edge_item(item):
+                edges = [item]
+            else:
+                # Defensive fallback for API wrappers that still expose Edges.
+                candidate_edges = getattr(item, 'Edges', None)
+                if candidate_edges is not None:
+                    edges = list(candidate_edges)
+                else:
+                    edges = [item]
+        except Exception:
+            edges = [item]
+        for edge in edges:
+            key = _edge_key(edge)
+            if key in seen_edges:
+                continue
+            seen_edges.add(key)
+            primitive = _curve_primitive_for_edge(edge)
+            if primitive is None:
+                skipped += 1
+                continue
+            primitives.append(primitive)
+    return primitives, skipped
+
+def _style_show_always(style):
+    # ShowWhen has an enum member literally named "None" in V19.  getattr is
+    # required because None is a Python keyword.
+    try:
+        style.ShowWhen = getattr(ShowWhen, 'None')
+    except Exception:
+        pass
+
+def _make_red_graphic(items):
+    primitives, skipped = red_primitives_from_items(items)
+    if not primitives:
+        return None, 0, skipped
+    style = GraphicStyle()
+    _style_show_always(style)
+    style.LineColor = Color.Red
+    style.LineWidth = Single(4.0)
+    style.IsSelectable = False
+    style.EnableDepthBuffer = True
+    graphic = Graphic.Create(style, Array[Primitive](primitives))
+    return graphic, len(primitives), skipped
+
+def _compose_overlay_graphics(graphics):
+    active = [graphic for graphic in graphics if graphic is not None]
+    if not active:
+        return None
+    if len(active) == 1:
+        return active[0]
+    style = GraphicStyle()
+    _style_show_always(style)
+    style.IsSelectable = False
+    return Graphic.Create(style, Array[Primitive]([]), Array[Graphic](active))
+
+def _clear_overlay_window(window):
+    # Confirmed in the user's SpaceClaim 2021 R1 / API V19 test:
+    # the Window.Rendering getter may throw when the custom-rendering slot is
+    # empty, but assigning a Graphic (or None) and RefreshRendering() works.
+    # Never read Window.Rendering here.
+    if window is None:
+        return False
+    try:
+        if window.IsDeleted:
+            return False
+    except Exception:
+        pass
+    try:
+        log_event('OVERLAY: direct clear Window.Rendering=None (getter avoided)')
+        window.Rendering = None
+        window.RefreshRendering()
+        return True
+    except Exception:
+        log_event('OVERLAY CLEAR ERROR: ' + traceback.format_exc())
+        return False
+
+def _apply_overlay_state(state):
+    if state is None:
+        return
+    window = state.get('window')
+    if window is None:
+        return
+    combined = _compose_overlay_graphics([state.get('red'), state.get('problem')])
+    try:
+        if combined is None:
+            log_event('OVERLAY: assign None | getter avoided')
+            window.Rendering = None
+        else:
+            log_event('OVERLAY: direct assign combined Window.Rendering | getter avoided')
+            window.Rendering = combined
+        window.RefreshRendering()
+        log_event('OVERLAY: RefreshRendering returned')
+    except Exception:
+        log_event('OVERLAY APPLY ERROR: ' + traceback.format_exc())
+        raise
+
+def _get_overlay_state_for_active_window():
+    window = SCWindow.ActiveWindow
+    if window is None:
+        raise RuntimeError('SpaceClaim active graphics window is unavailable.')
+    state = AppDomain.CurrentDomain.GetData(COLOR_STATE_KEY)
+    if state is None:
+        state = {'window': window, 'red': None, 'problem': None,
+                 'red_count': 0, 'problem_count': 0}
+        AppDomain.CurrentDomain.SetData(COLOR_STATE_KEY, state)
+        return state
+    old_window = state.get('window')
+    if old_window is not None and not _windows_equal(old_window, window):
+        _clear_overlay_window(old_window)
+        state = {'window': window, 'red': None, 'problem': None,
+                 'red_count': 0, 'problem_count': 0}
+        AppDomain.CurrentDomain.SetData(COLOR_STATE_KEY, state)
+    return state
+
+def clear_red_weld_overlay():
+    state = AppDomain.CurrentDomain.GetData(COLOR_STATE_KEY)
+    if state is None:
+        return 0
+    count = int(state.get('red_count', 0))
+    state['red'] = None
+    state['red_count'] = 0
+    _apply_overlay_state(state)
+    if state.get('problem') is None:
+        AppDomain.CurrentDomain.SetData(COLOR_STATE_KEY, None)
+    log_event('RED OVERLAY: cleared | primitives=%d' % count)
+    return count
+
+def set_red_weld_overlay(items):
+    red_graphic, primitive_count, skipped = _make_red_graphic(items)
+    state = _get_overlay_state_for_active_window()
+    state['red'] = red_graphic
+    state['red_count'] = primitive_count
+    _apply_overlay_state(state)
+    log_event('RED OVERLAY: applied | source_items=%d | primitives=%d | skipped=%d' %
+              (len(items), primitive_count, skipped))
+    return primitive_count
+
+def _make_problem_graphic(items):
+    primitives, skipped = red_primitives_from_items(items)
+    if not primitives:
+        return None, 0, skipped
+    style = GraphicStyle()
+    _style_show_always(style)
+    style.LineColor = Color.Orange
+    style.LineWidth = Single(6.0)
+    style.IsSelectable = False
+    style.EnableDepthBuffer = True
+    graphic = Graphic.Create(style, Array[Primitive](primitives))
+    return graphic, len(primitives), skipped
+
+def set_problem_overlay(items):
+    graphic, primitive_count, skipped = _make_problem_graphic(items)
+    state = _get_overlay_state_for_active_window()
+    state['problem'] = graphic
+    state['problem_count'] = primitive_count
+    _apply_overlay_state(state)
+    log_event('PROBLEM OVERLAY: applied | source_items=%d | primitives=%d | skipped=%d' %
+              (len(items), primitive_count, skipped))
+    return primitive_count
+
+def clear_problem_highlight():
+    state = AppDomain.CurrentDomain.GetData(COLOR_STATE_KEY)
+    if state is None:
+        return 0
+    count = int(state.get('problem_count', 0))
+    state['problem'] = None
+    state['problem_count'] = 0
+    _apply_overlay_state(state)
+    if state.get('red') is None:
+        AppDomain.CurrentDomain.SetData(COLOR_STATE_KEY, None)
+    log_event('PROBLEM OVERLAY: cleared | primitives=%d' % count)
+    return count
+
 def weld_group_geometry(root):
     # Exact geometry from all Weld Namer groups.  We deliberately use SpaceClaim's
     # secondary-selection highlight instead of changing CAD appearance.  In V19,
@@ -106,23 +379,28 @@ def weld_group_geometry(root):
     return group_names, items
 
 def highlight_weld_groups(root, clear_primary=False):
-    group_names, items = weld_group_geometry(root)
+    clear_problem_highlight()
+    a_names, a_items, b_names, b_items = weld_group_geometry_by_side(root)
     if clear_primary:
         # After Create Next the just-created edges are still the primary selection.
-        # Clear only that primary selection first so the weld overlay can be seen
-        # in SpaceClaim's secondary-selection color (normally blue).
         Selection.Empty().SetActive()
-    if items:
-        Selection.Create(items).SetActiveSecondary()
+    if a_items:
+        Selection.Create(a_items).SetActiveSecondary()
     else:
         Selection.Empty().SetActiveSecondary()
+    red_primitives = set_red_weld_overlay(b_items)
+    total_groups = len(a_names) + len(b_names)
+    total_items = len(a_items) + len(b_items)
     log_event('HIGHLIGHT: groups=%d | items=%d | clear_primary=%s' %
-              (len(group_names), len(items), str(bool(clear_primary))))
-    return len(group_names), len(items)
+              (total_groups, total_items, str(bool(clear_primary))))
+    log_event('HIGHLIGHT AB: A groups=%d/items=%d secondary | B groups=%d/items=%d red_primitives=%d' %
+              (len(a_names), len(a_items), len(b_names), len(b_items), red_primitives))
+    return total_groups, total_items
 
 def clear_weld_highlight():
     Selection.Empty().SetActiveSecondary()
-    log_event('HIGHLIGHT: secondary selection cleared')
+    red_count = clear_red_weld_overlay()
+    log_event('HIGHLIGHT: secondary selection and red B overlay cleared | red_primitives=%d' % red_count)
 
 def pair_number_from_name(name):
     match = re.match(r'^w([1-9][0-9]*)([ab])$', str(name).lower())
@@ -175,26 +453,467 @@ def geometry_for_group_names(root, requested_names):
     return found_names, items
 
 def highlight_pair(root, pair_number, clear_primary=False):
+    clear_problem_highlight()
     if pair_number is None or pair_number < 1:
         Selection.Empty().SetActiveSecondary()
+        clear_red_weld_overlay()
         log_event('HIGHLIGHT PAIR: none | clear_primary=%s' % str(bool(clear_primary)))
         return 0, 0
-    requested = ['w%da' % pair_number, 'w%db' % pair_number]
-    group_names, items = geometry_for_group_names(root, requested)
+
+    a_requested = ['w%da' % pair_number]
+    b_requested = ['w%db' % pair_number]
+    a_names, a_items = geometry_for_group_names(root, a_requested)
+    b_names, b_items = geometry_for_group_names(root, b_requested)
     if clear_primary:
         Selection.Empty().SetActive()
-    if items:
-        Selection.Create(items).SetActiveSecondary()
+    if a_items:
+        Selection.Create(a_items).SetActiveSecondary()
     else:
         Selection.Empty().SetActiveSecondary()
+    red_primitives = set_red_weld_overlay(b_items)
+    total_groups = len(a_names) + len(b_names)
+    total_items = len(a_items) + len(b_items)
     log_event('HIGHLIGHT PAIR: w%d | groups=%d | items=%d | clear_primary=%s' %
-              (pair_number, len(group_names), len(items), str(bool(clear_primary))))
-    return len(group_names), len(items)
+              (pair_number, total_groups, total_items, str(bool(clear_primary))))
+    log_event('HIGHLIGHT PAIR AB: w%d | A groups=%d/items=%d secondary | B groups=%d/items=%d red_primitives=%d' %
+              (pair_number, len(a_names), len(a_items), len(b_names), len(b_items), red_primitives))
+    return total_groups, total_items
 
 def highlight_current_pair(root, clear_primary=False):
     pair_number, target = current_pair_from_names(names_in(root))
     groups, items = highlight_pair(root, pair_number, clear_primary)
     return pair_number, groups, items, target
+
+
+def _doc_item_key(item):
+    try:
+        return 'M:' + str(item.Moniker)
+    except Exception:
+        pass
+    try:
+        return 'E:' + str(item.ExportIdentifier)
+    except Exception:
+        pass
+    return 'O:' + str(item.GetType().FullName) + ':' + str(item)
+
+def _geometry_kind(items):
+    if not items:
+        return 'Empty'
+    kinds = set()
+    for item in items:
+        if _is_weld_edge_item(item):
+            kinds.add('Edges')
+        elif _is_weld_face_item(item):
+            kinds.add('Faces')
+        else:
+            kinds.add('Other')
+    if len(kinds) == 1:
+        return list(kinds)[0]
+    return 'Mixed'
+
+def _geometry_metric(items, kind):
+    # Metric is used only as a relative A/B screening value.  No display-unit
+    # assumption is made.  For Edges it is total curve length; for Faces total area.
+    total = 0.0
+    if kind == 'Edges':
+        for item in items:
+            value = None
+            try:
+                value = item.Shape.Length
+            except Exception:
+                try:
+                    value = item.Length
+                except Exception:
+                    pass
+            if value is None:
+                return None
+            total += float(value)
+        return total
+    if kind == 'Faces':
+        for item in items:
+            value = None
+            try:
+                value = item.Area
+            except Exception:
+                try:
+                    value = item.Shape.Area
+                except Exception:
+                    pass
+            if value is None:
+                return None
+            total += float(value)
+        return total
+    return None
+
+def _relative_difference_percent(a, b):
+    if a is None or b is None:
+        return None
+    scale = max(abs(float(a)), abs(float(b)))
+    if scale <= 1.0e-15:
+        return 0.0
+    return abs(float(a) - float(b)) / scale * 100.0
+
+def validate_weld_named_selections(root, metric_tolerance_percent=10.0):
+    # Read-only QA screening.  The metric tolerance is deliberately a screening
+    # criterion, not a weld acceptance criterion: partition counts may legitimately
+    # differ while total edge length / face area remains comparable.
+    groups = all_groups(root)
+    weld_groups = []
+    group_names_lower = {}
+    geometry_cache = {}
+    usage = {}
+
+    for group in groups:
+        name = str(group.Name)
+        lower = name.lower()
+        match = re.match(r'^w([1-9][0-9]*)([ab])$', lower)
+        if match is None:
+            continue
+        number = int(match.group(1))
+        side = match.group(2)
+        weld_groups.append((number, side, name))
+        group_names_lower.setdefault(lower, []).append(name)
+        try:
+            sel = Selection.CreateByGroups(name)
+            items = [] if sel is None else list(sel.Items)
+        except Exception:
+            items = []
+            log_event('QA WARNING: failed to resolve geometry for %s: %s' % (name, traceback.format_exc()))
+        geometry_cache[lower] = items
+        for item in items:
+            key = _doc_item_key(item)
+            usage.setdefault(key, set()).add(lower)
+
+    by_pair = {}
+    for number, side, name in weld_groups:
+        by_pair.setdefault(number, {})[side] = name
+
+    # Whole-pair sequence gaps are useful QA findings, but MAX_PAIR is very large.
+    # Never expand an accidental high-number group into millions of table rows.
+    # Enumerate at most 1000 missing pair numbers; larger gaps are summarized on
+    # the first existing pair after the gap.
+    pair_numbers = sorted(by_pair.keys())
+    validation_numbers = set(pair_numbers)
+    gap_annotations = {}
+    gap_budget = 1000
+    previous = 0
+    for existing_number in pair_numbers:
+        gap_count = existing_number - previous - 1
+        if gap_count > 0:
+            if gap_count <= gap_budget:
+                for missing_number in range(previous + 1, existing_number):
+                    validation_numbers.add(missing_number)
+                gap_budget -= gap_count
+            else:
+                gap_annotations[existing_number] = (previous + 1, existing_number - 1)
+                gap_budget = 0
+        previous = existing_number
+
+    records = []
+    for number in sorted(validation_numbers):
+        names = by_pair.get(number, {})
+        a_name = names.get('a')
+        b_name = names.get('b')
+        a_items = geometry_cache.get(a_name.lower(), []) if a_name else []
+        b_items = geometry_cache.get(b_name.lower(), []) if b_name else []
+        a_kind = _geometry_kind(a_items)
+        b_kind = _geometry_kind(b_items)
+        reasons = []
+        severity = 0  # 0 OK, 1 CHECK, 2 ERROR
+
+        if number in gap_annotations:
+            first_missing, last_missing = gap_annotations[number]
+            severity = 2
+            if first_missing == last_missing:
+                reasons.append('Large sequence gap: missing w%d' % first_missing)
+            else:
+                reasons.append('Large sequence gap: missing w%d..w%d' %
+                               (first_missing, last_missing))
+
+        if a_name is None:
+            severity = 2
+            reasons.append('Missing A')
+        if b_name is None:
+            severity = 2
+            reasons.append('Missing B')
+        if a_name is not None and not a_items:
+            severity = 2
+            reasons.append('A empty/unresolved')
+        if b_name is not None and not b_items:
+            severity = 2
+            reasons.append('B empty/unresolved')
+
+        if a_items and a_kind in ('Mixed', 'Other'):
+            severity = 2
+            reasons.append('A geometry type: %s' % a_kind)
+        if b_items and b_kind in ('Mixed', 'Other'):
+            severity = 2
+            reasons.append('B geometry type: %s' % b_kind)
+        if a_items and b_items and a_kind != b_kind:
+            severity = 2
+            reasons.append('A/B type mismatch')
+
+        a_metric = _geometry_metric(a_items, a_kind)
+        b_metric = _geometry_metric(b_items, b_kind)
+        metric_diff = None
+        if a_items and b_items and a_kind == b_kind and a_kind in ('Edges', 'Faces'):
+            metric_diff = _relative_difference_percent(a_metric, b_metric)
+            if metric_diff is not None and metric_diff > float(metric_tolerance_percent):
+                severity = max(severity, 1)
+                label = 'length' if a_kind == 'Edges' else 'area'
+                reasons.append('%s mismatch %.1f%% > %.1f%%' %
+                               (label, metric_diff, float(metric_tolerance_percent)))
+
+        # Object-count mismatch is shown in the table but is not automatically a
+        # problem because one side of a weld may be split into more topological
+        # edges/faces than the other.
+        if a_items and b_items and len(a_items) != len(b_items):
+            reasons.append('Count A/B %d/%d (info)' % (len(a_items), len(b_items)))
+
+        own_groups = set()
+        if a_name:
+            own_groups.add(a_name.lower())
+        if b_name:
+            own_groups.add(b_name.lower())
+        duplicate_external = set()
+        duplicate_internal = False
+        pair_keys = {}
+        conflict_items = []
+        conflict_item_keys = set()
+        for side_name, side_items in ((a_name, a_items), (b_name, b_items)):
+            if side_name is None:
+                continue
+            for item in side_items:
+                key = _doc_item_key(item)
+                pair_keys.setdefault(key, set()).add(side_name.lower())
+                users = usage.get(key, set())
+                external = users.difference(own_groups)
+                if external:
+                    duplicate_external.update(external)
+                    if key not in conflict_item_keys:
+                        conflict_item_keys.add(key)
+                        conflict_items.append(item)
+        for key, users in pair_keys.items():
+            if len(users) > 1:
+                duplicate_internal = True
+                # Also expose the internally duplicated object for conflict highlight.
+                if key not in conflict_item_keys:
+                    for item in a_items + b_items:
+                        if _doc_item_key(item) == key:
+                            conflict_item_keys.add(key)
+                            conflict_items.append(item)
+                            break
+        if duplicate_internal:
+            severity = 2
+            reasons.append('Same geometry used in A and B')
+        if duplicate_external:
+            severity = max(severity, 1)
+            reasons.append('Geometry reused by other weld group(s)')
+
+        # Case-insensitive duplicate group names are an error if the host permits them.
+        duplicate_names = []
+        for actual in (a_name, b_name):
+            if actual is not None and len(group_names_lower.get(actual.lower(), [])) > 1:
+                duplicate_names.append(actual)
+        if duplicate_names:
+            severity = 2
+            reasons.append('Duplicate group name ignoring case')
+
+        status = 'ERROR' if severity == 2 else ('CHECK' if severity == 1 else 'OK')
+        problem_reasons = [r for r in reasons if not r.endswith('(info)')]
+        info_reasons = [r for r in reasons if r.endswith('(info)')]
+        reason_text = '; '.join(problem_reasons + info_reasons) if reasons else 'OK'
+        records.append({
+            'pair': number,
+            'a_name': a_name or '',
+            'b_name': b_name or '',
+            'a_items': a_items,
+            'b_items': b_items,
+            'a_kind': a_kind,
+            'b_kind': b_kind,
+            'a_count': len(a_items),
+            'b_count': len(b_items),
+            'a_metric': a_metric,
+            'b_metric': b_metric,
+            'metric_diff': metric_diff,
+            'status': status,
+            'severity': severity,
+            'reason': reason_text,
+            'problem': severity > 0,
+            'conflict_groups': sorted(list(duplicate_external)),
+            'conflict_items': conflict_items,
+            'duplicate_internal': duplicate_internal
+        })
+
+    log_event('QA VALIDATE: weld_groups=%d | pairs=%d | problems=%d | tolerance=%.1f%%' %
+              (len(weld_groups), len(records), sum(1 for r in records if r['problem']),
+               float(metric_tolerance_percent)))
+    return records
+
+def problem_geometry_from_records(records):
+    items = []
+    for record in records:
+        if not record.get('problem'):
+            continue
+        items.extend(record.get('a_items', []))
+        items.extend(record.get('b_items', []))
+    return items
+
+def highlight_problem_records(records):
+    # Problem mode is intentionally visually exclusive: orange = screening issue.
+    Selection.Empty().SetActiveSecondary()
+    clear_red_weld_overlay()
+    items = problem_geometry_from_records(records)
+    count = set_problem_overlay(items) if items else 0
+    log_event('QA HIGHLIGHT PROBLEMS: pairs=%d | items=%d | primitives=%d' %
+              (sum(1 for r in records if r.get('problem')), len(items), count))
+    return count
+
+def clear_all_weld_overlays():
+    Selection.Empty().SetActiveSecondary()
+    red_count = clear_red_weld_overlay()
+    problem_count = clear_problem_highlight()
+    log_event('HIGHLIGHT: all overlays cleared | red=%d | problem=%d' %
+              (red_count, problem_count))
+
+def _repair_selection_items():
+    selection = Selection.GetActive()
+    if selection is None:
+        raise ValueError('Select replacement geometry in the SpaceClaim graphics window first.')
+    items = list(selection.Items)
+    if not items:
+        raise ValueError('Select one or more edges/faces in the SpaceClaim graphics window first.')
+    kind = _geometry_kind(items)
+    if kind not in ('Edges', 'Faces'):
+        raise ValueError('Repair selection must contain only Edges or only Faces. Current type: %s' % kind)
+    validate_items(items, kind)
+    return items, kind
+
+def _unique_items(items):
+    result = []
+    seen = set()
+    for item in items:
+        key = _doc_item_key(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+    return result
+
+def _actual_group_name(root, requested_name):
+    requested_lower = str(requested_name).lower()
+    matches = [str(g.Name) for g in all_groups(root) if str(g.Name).lower() == requested_lower]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        return None
+    raise RuntimeError('Duplicate group names ignoring case: %s' % requested_name)
+
+def _validate_repair_kind(items, expected_kind=None):
+    kind = _geometry_kind(items)
+    if kind not in ('Edges', 'Faces'):
+        raise ValueError('Repair geometry must be all Edges or all Faces. Current type: %s' % kind)
+    if expected_kind in ('Edges', 'Faces') and kind != expected_kind:
+        raise ValueError('Geometry type mismatch: target expects %s, current selection is %s.' %
+                         (expected_kind, kind))
+    validate_items(items, kind)
+    return kind
+
+def _log_replace_signature():
+    try:
+        for method in runtime_type(NamedSelection).GetMethods():
+            if method.Name == 'Replace':
+                log_event('REPAIR API SIGNATURE: ' + str(method))
+    except Exception:
+        log_event('REPAIR signature diagnostics unavailable: ' + traceback.format_exc())
+
+def replace_named_selection_geometry(root, group_name, new_items, expected_kind=None):
+    actual = _actual_group_name(root, group_name)
+    if actual is None:
+        raise ValueError('Named Selection does not exist: ' + str(group_name))
+    new_items = _unique_items(new_items)
+    if not new_items:
+        raise ValueError('Replacement geometry cannot be empty.')
+    kind = _validate_repair_kind(new_items, expected_kind)
+    expected_keys = set(_doc_item_key(item) for item in new_items)
+    selection = Selection.Create(new_items)
+    log_event('REPAIR REPLACE: begin | group=%s | kind=%s | items=%d' %
+              (actual, kind, len(new_items)))
+    _log_replace_signature()
+    # Reflection from the user's real SpaceClaim 2021 R1 / API V19 installation
+    # confirms NamedSelection.Replace(name, primary, secondary, ICommandInfo).
+    # Like the already proven Create command, the scripting wrapper exposes the
+    # final command-info argument as optional in IronPython.
+    NamedSelection.Replace(actual, selection, Selection.Empty())
+    log_event('REPAIR REPLACE: NamedSelection.Replace returned | group=' + actual)
+    verify = Selection.CreateByGroups(actual)
+    verified_items = [] if verify is None else list(verify.Items)
+    verified_keys = set(_doc_item_key(item) for item in verified_items)
+    if expected_keys != verified_keys:
+        raise RuntimeError('Replace returned, but geometry verification failed for %s. Expected %d unique item(s), got %d.' %
+                           (actual, len(expected_keys), len(verified_keys)))
+    log_event('REPAIR REPLACE: verified | group=%s | items=%d' % (actual, len(verified_items)))
+    return actual, len(verified_items), kind
+
+def create_missing_named_selection(root, target, items, expected_kind=None):
+    if _actual_group_name(root, target) is not None:
+        raise ValueError('Named Selection already exists: ' + str(target))
+    items = _unique_items(items)
+    if not items:
+        raise ValueError('Cannot create an empty Named Selection.')
+    kind = _validate_repair_kind(items, expected_kind)
+    selection = Selection.Create(items)
+    before = all_groups(root)
+    log_event('REPAIR CREATE MISSING: begin | target=%s | kind=%s | items=%d' %
+              (target, kind, len(items)))
+    NamedSelection.Create(selection, Selection.Empty())
+    after = all_groups(root)
+    added = [g for g in after if g not in before]
+    if len(added) != 1:
+        raise RuntimeError('Creation could not be verified. Inspect Groups before retrying.')
+    new_group = added[0]
+    temporary_name = str(new_group.Name)
+    if _actual_group_name(root, target) is not None and str(new_group.Name).lower() != str(target).lower():
+        raise RuntimeError('Target name became occupied: ' + str(target))
+    if temporary_name != target:
+        NamedSelection.Rename(temporary_name, target)
+    if str(new_group.Name) != target:
+        raise RuntimeError('Rename was not confirmed for new group ' + str(target))
+    verify = Selection.CreateByGroups(target)
+    verified = [] if verify is None else list(verify.Items)
+    expected_keys = set(_doc_item_key(item) for item in items)
+    verified_keys = set(_doc_item_key(item) for item in verified)
+    if expected_keys != verified_keys:
+        raise RuntimeError('Created %s, but geometry verification failed.' % target)
+    log_event('REPAIR CREATE MISSING: verified | target=%s | items=%d' % (target, len(verified)))
+    return target, len(verified), kind
+
+def repair_expected_kind(record, side):
+    own = record.get('%s_kind' % side.lower())
+    other_side = 'b' if side.lower() == 'a' else 'a'
+    other = record.get('%s_kind' % other_side)
+    if own in ('Edges', 'Faces'):
+        return own
+    if other in ('Edges', 'Faces'):
+        return other
+    return None
+
+def repair_existing_items(record, side):
+    return list(record.get('%s_items' % side.lower(), []))
+
+def repair_target_name(record, side):
+    side = side.lower()
+    existing = record.get('%s_name' % side)
+    if existing:
+        return existing
+    return 'w%d%s' % (record['pair'], side)
+
+def repair_merge_items(existing, selected):
+    return _unique_items(list(existing) + list(selected))
+
+def repair_remove_items(existing, selected):
+    remove_keys = set(_doc_item_key(item) for item in selected)
+    return [item for item in existing if _doc_item_key(item) not in remove_keys]
 
 def create_next(mode="Faces", auto_highlight=True):
     log_event('CREATE: begin')
@@ -245,9 +964,12 @@ def create_next(mode="Faces", auto_highlight=True):
 import clr
 clr.AddReference('System.Windows.Forms')
 clr.AddReference('System.Drawing')
-from System.Windows.Forms import Form, Button, Label, TextBox, CheckBox, FormBorderStyle, FormStartPosition, ScrollBars, ComboBox, ComboBoxStyle
-from System.Drawing import Point, Size
-from System import Action, IntPtr, AppDomain, String
+clr.AddReference('SpaceClaim.Api.V19')
+from System.Windows.Forms import Form, Button, Label, TextBox, CheckBox, FormBorderStyle, FormStartPosition, ScrollBars, ComboBox, ComboBoxStyle, DataGridView, DataGridViewSelectionMode, DataGridViewAutoSizeColumnsMode, DataGridViewColumnHeadersHeightSizeMode, DataGridViewTextBoxColumn, SaveFileDialog, DialogResult, MessageBox, MessageBoxButtons, MessageBoxIcon
+from System.Drawing import Point, Size, Color
+from System import Action, IntPtr, AppDomain, String, Array, Single, Object
+from SpaceClaim.Api.V19 import Window as SCWindow
+from SpaceClaim.Api.V19.Display import Graphic, GraphicStyle, CurvePrimitive, Primitive, ShowWhen
 from System.Diagnostics import Process
 from System.Threading import Thread, Monitor
 from System.Windows.Forms import Control
@@ -256,7 +978,8 @@ import tempfile
 import io
 import datetime
 
-LOG_PATH = os.path.join(tempfile.gettempdir(), 'SpaceClaim_Weld_Namer_v010.log')
+LOG_PATH = os.path.join(tempfile.gettempdir(), 'SpaceClaim_Weld_Namer_v012.log')
+COLOR_STATE_KEY = 'MF.SpaceClaim.WeldNamer.v012.OverlayState'
 
 def log_event(text):
     # Logging must not call the script editor from a UI callback.
@@ -269,11 +992,514 @@ def log_event(text):
         pass
 
 
+
+class NamedSelectionManagerForm(Form):
+    def __init__(self, parent_form):
+        Form.__init__(self)
+        self.parent_form = parent_form
+        self.Text = 'MF | Weld Named Selection QA / Repair Manager 0.12.0'
+        self.ClientSize = Size(1080, 720)
+        self.FormBorderStyle = FormBorderStyle.SizableToolWindow
+        self.StartPosition = FormStartPosition.CenterParent
+        self.TopMost = True
+        self.ShowInTaskbar = False
+        self.records = []
+        self.metric_tolerance = 10.0
+
+        self.info = Label()
+        self.info.Text = ('QA screening + controlled repair. Orange = problem. A/B object-count differences are informational; '
+                          'edge-length / face-area mismatch > 10% is CHECK. Repair uses current SpaceClaim selection.')
+        self.info.Location = Point(12, 10)
+        self.info.Size = Size(1045, 36)
+
+        self.validate_btn = Button()
+        self.validate_btn.Text = 'Validate All'
+        self.validate_btn.Location = Point(12, 50)
+        self.validate_btn.Size = Size(130, 32)
+        self.validate_btn.Click += self.on_validate
+
+        self.problems_only = CheckBox()
+        self.problems_only.Text = 'Show Problems Only'
+        self.problems_only.Location = Point(155, 55)
+        self.problems_only.Size = Size(165, 24)
+        self.problems_only.CheckedChanged += self.on_filter_changed
+
+        self.highlight_problems_btn = Button()
+        self.highlight_problems_btn.Text = 'Highlight Problems'
+        self.highlight_problems_btn.Location = Point(335, 50)
+        self.highlight_problems_btn.Size = Size(150, 32)
+        self.highlight_problems_btn.Click += self.on_highlight_problems
+
+        self.clear_problem_btn = Button()
+        self.clear_problem_btn.Text = 'Clear Problem Highlight'
+        self.clear_problem_btn.Location = Point(495, 50)
+        self.clear_problem_btn.Size = Size(175, 32)
+        self.clear_problem_btn.Click += self.on_clear_problem
+
+        self.export_btn = Button()
+        self.export_btn.Text = 'Export CSV'
+        self.export_btn.Location = Point(680, 50)
+        self.export_btn.Size = Size(120, 32)
+        self.export_btn.Click += self.on_export
+
+        self.grid = DataGridView()
+        self.grid.Location = Point(12, 94)
+        self.grid.Size = Size(1055, 350)
+        self.grid.ReadOnly = True
+        self.grid.AllowUserToAddRows = False
+        self.grid.AllowUserToDeleteRows = False
+        self.grid.MultiSelect = False
+        self.grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect
+        self.grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
+        self.grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize
+        self.grid.RowHeadersVisible = False
+        self.grid.SelectionChanged += self.on_selection_changed
+        for title in ('Weld', 'A', 'B', 'Type A', 'Type B', 'Count A', 'Count B', 'Metric diff %', 'Status', 'Reason'):
+            column = DataGridViewTextBoxColumn()
+            column.HeaderText = title
+            column.Name = title
+            if title in ('Weld', 'Count A', 'Count B', 'Metric diff %', 'Status'):
+                column.FillWeight = 55
+            elif title in ('A', 'B', 'Type A', 'Type B'):
+                column.FillWeight = 70
+            else:
+                column.FillWeight = 200
+            self.grid.Columns.Add(column)
+
+        self.prev_btn = Button()
+        self.prev_btn.Text = '< Previous Problem'
+        self.prev_btn.Location = Point(12, 457)
+        self.prev_btn.Size = Size(150, 34)
+        self.prev_btn.Click += self.on_previous_problem
+
+        self.next_btn = Button()
+        self.next_btn.Text = 'Next Problem >'
+        self.next_btn.Location = Point(172, 457)
+        self.next_btn.Size = Size(150, 34)
+        self.next_btn.Click += self.on_next_problem
+
+        self.highlight_selected_btn = Button()
+        self.highlight_selected_btn.Text = 'Highlight Selected Pair'
+        self.highlight_selected_btn.Location = Point(337, 457)
+        self.highlight_selected_btn.Size = Size(175, 34)
+        self.highlight_selected_btn.Click += self.on_highlight_selected
+
+        self.zoom_btn = Button()
+        self.zoom_btn.Text = 'Zoom Selected Pair'
+        self.zoom_btn.Location = Point(522, 457)
+        self.zoom_btn.Size = Size(160, 34)
+        self.zoom_btn.Click += self.on_zoom_selected
+
+        self.repair_label = Label()
+        self.repair_label.Text = 'Repair selected pair using CURRENT SpaceClaim primary selection:'
+        self.repair_label.Location = Point(12, 502)
+        self.repair_label.Size = Size(620, 22)
+
+        self.replace_a_btn = Button()
+        self.replace_a_btn.Text = 'Replace A'
+        self.replace_a_btn.Location = Point(12, 526)
+        self.replace_a_btn.Size = Size(120, 32)
+        self.replace_a_btn.Click += lambda s, e: self.on_repair_side('a', 'replace')
+
+        self.replace_b_btn = Button()
+        self.replace_b_btn.Text = 'Replace B'
+        self.replace_b_btn.Location = Point(140, 526)
+        self.replace_b_btn.Size = Size(120, 32)
+        self.replace_b_btn.Click += lambda s, e: self.on_repair_side('b', 'replace')
+
+        self.add_a_btn = Button()
+        self.add_a_btn.Text = 'Add to A'
+        self.add_a_btn.Location = Point(268, 526)
+        self.add_a_btn.Size = Size(120, 32)
+        self.add_a_btn.Click += lambda s, e: self.on_repair_side('a', 'add')
+
+        self.add_b_btn = Button()
+        self.add_b_btn.Text = 'Add to B'
+        self.add_b_btn.Location = Point(396, 526)
+        self.add_b_btn.Size = Size(120, 32)
+        self.add_b_btn.Click += lambda s, e: self.on_repair_side('b', 'add')
+
+        self.remove_a_btn = Button()
+        self.remove_a_btn.Text = 'Remove from A'
+        self.remove_a_btn.Location = Point(12, 564)
+        self.remove_a_btn.Size = Size(120, 32)
+        self.remove_a_btn.Click += lambda s, e: self.on_repair_side('a', 'remove')
+
+        self.remove_b_btn = Button()
+        self.remove_b_btn.Text = 'Remove from B'
+        self.remove_b_btn.Location = Point(140, 564)
+        self.remove_b_btn.Size = Size(120, 32)
+        self.remove_b_btn.Click += lambda s, e: self.on_repair_side('b', 'remove')
+
+        self.create_a_btn = Button()
+        self.create_a_btn.Text = 'Create Missing A'
+        self.create_a_btn.Location = Point(268, 564)
+        self.create_a_btn.Size = Size(120, 32)
+        self.create_a_btn.Click += lambda s, e: self.on_create_missing('a')
+
+        self.create_b_btn = Button()
+        self.create_b_btn.Text = 'Create Missing B'
+        self.create_b_btn.Location = Point(396, 564)
+        self.create_b_btn.Size = Size(120, 32)
+        self.create_b_btn.Click += lambda s, e: self.on_create_missing('b')
+
+        self.conflict_btn = Button()
+        self.conflict_btn.Text = 'Highlight Conflict'
+        self.conflict_btn.Location = Point(530, 526)
+        self.conflict_btn.Size = Size(150, 70)
+        self.conflict_btn.Click += self.on_highlight_conflict
+
+        self.details = TextBox()
+        self.details.Location = Point(12, 608)
+        self.details.Size = Size(1055, 98)
+        self.details.Multiline = True
+        self.details.ReadOnly = True
+        self.details.ScrollBars = ScrollBars.Vertical
+        self.details.Text = 'Press Validate All.'
+
+        for control in (self.info, self.validate_btn, self.problems_only,
+                        self.highlight_problems_btn, self.clear_problem_btn,
+                        self.export_btn, self.grid, self.prev_btn, self.next_btn,
+                        self.highlight_selected_btn, self.zoom_btn, self.repair_label,
+                        self.replace_a_btn, self.replace_b_btn, self.add_a_btn, self.add_b_btn,
+                        self.remove_a_btn, self.remove_b_btn, self.create_a_btn, self.create_b_btn,
+                        self.conflict_btn, self.details):
+            self.Controls.Add(control)
+
+        self.FormClosed += self.on_closed
+        self.on_validate(None, None)
+
+    def on_closed(self, sender, args):
+        try:
+            if self.parent_form is not None:
+                self.parent_form.manager_form = None
+        except Exception:
+            pass
+
+    def on_validate(self, sender, args):
+        try:
+            self.records = validate_weld_named_selections(context(), self.metric_tolerance)
+            self.refresh_grid()
+            problems = sum(1 for r in self.records if r['problem'])
+            errors = sum(1 for r in self.records if r['status'] == 'ERROR')
+            checks = sum(1 for r in self.records if r['status'] == 'CHECK')
+            self.details.Text = (('Validation complete: %d pairs | %d problems (%d ERROR, %d CHECK).\r\n'
+                                  'CHECK is screening only; review geometry before changing the model.') %
+                                 (len(self.records), problems, errors, checks))
+        except Exception:
+            self.details.Text = traceback.format_exc()
+            log_event(self.details.Text)
+
+    def refresh_grid(self):
+        selected_pair = self.selected_pair_number()
+        self.grid.Rows.Clear()
+        for record in self.records:
+            if self.problems_only.Checked and not record['problem']:
+                continue
+            diff = '' if record['metric_diff'] is None else ('%.1f' % record['metric_diff'])
+            values = ('w%d' % record['pair'], record['a_name'], record['b_name'],
+                      record['a_kind'], record['b_kind'], str(record['a_count']),
+                      str(record['b_count']), diff, record['status'], record['reason'])
+            idx = self.grid.Rows.Add(Array[Object](list(values)))
+            row = self.grid.Rows[idx]
+            row.Tag = record['pair']
+            if record['status'] == 'ERROR':
+                row.DefaultCellStyle.BackColor = Color.MistyRose
+            elif record['status'] == 'CHECK':
+                row.DefaultCellStyle.BackColor = Color.LemonChiffon
+        if selected_pair is not None:
+            self.select_pair_row(selected_pair)
+        elif self.grid.Rows.Count > 0:
+            self.grid.Rows[0].Selected = True
+
+    def on_filter_changed(self, sender, args):
+        try:
+            self.refresh_grid()
+        except Exception:
+            self.details.Text = traceback.format_exc()
+
+    def selected_pair_number(self):
+        try:
+            if self.grid.SelectedRows.Count > 0:
+                return int(self.grid.SelectedRows[0].Tag)
+        except Exception:
+            pass
+        return None
+
+    def selected_record(self):
+        pair = self.selected_pair_number()
+        if pair is None:
+            return None
+        for record in self.records:
+            if record['pair'] == pair:
+                return record
+        return None
+
+    def select_pair_row(self, pair):
+        for row in self.grid.Rows:
+            try:
+                if int(row.Tag) == int(pair):
+                    self.grid.ClearSelection()
+                    row.Selected = True
+                    self.grid.CurrentCell = row.Cells[0]
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def on_selection_changed(self, sender, args):
+        record = self.selected_record()
+        if record is None:
+            return
+        diff = 'n/a' if record['metric_diff'] is None else '%.2f%%' % record['metric_diff']
+        conflicts = ', '.join(record.get('conflict_groups', []))
+        conflict_text = '' if not conflicts else ('\r\nConflict groups: ' + conflicts)
+        self.details.Text = (('w%d | %s\r\nA: %s | %s | count=%d\r\nB: %s | %s | count=%d\r\nMetric difference: %s | %s%s') %
+                             (record['pair'], record['status'], record['a_name'] or '<missing>',
+                              record['a_kind'], record['a_count'], record['b_name'] or '<missing>',
+                              record['b_kind'], record['b_count'], diff, record['reason'], conflict_text))
+
+    def on_highlight_problems(self, sender, args):
+        try:
+            if not self.records:
+                self.on_validate(None, None)
+            primitives = highlight_problem_records(self.records)
+            problem_count = sum(1 for r in self.records if r['problem'])
+            self.details.Text = (('Problem highlight: %d pair(s), %d orange primitive(s).\r\n'
+                                  'Orange is a QA screening flag, not an engineering acceptance result.') %
+                                 (problem_count, primitives))
+        except Exception:
+            self.details.Text = traceback.format_exc()
+            log_event(self.details.Text)
+
+    def on_clear_problem(self, sender, args):
+        try:
+            count = clear_problem_highlight()
+            self.details.Text = 'Problem highlight cleared (%d primitive(s)).' % count
+        except Exception:
+            self.details.Text = traceback.format_exc()
+            log_event(self.details.Text)
+
+    def _problem_pairs(self):
+        return [r['pair'] for r in self.records if r['problem']]
+
+    def _move_problem(self, step):
+        pairs = self._problem_pairs()
+        if not pairs:
+            self.details.Text = 'No problems found.'
+            return
+        current = self.selected_pair_number()
+        if current not in pairs:
+            target = pairs[0] if step > 0 else pairs[-1]
+        else:
+            idx = pairs.index(current)
+            target = pairs[(idx + step) % len(pairs)]
+        if self.problems_only.Checked or self.select_pair_row(target):
+            self.select_pair_row(target)
+        else:
+            self.problems_only.Checked = True
+            self.select_pair_row(target)
+        self._highlight_pair_number(target, zoom=True)
+
+    def on_previous_problem(self, sender, args):
+        self._move_problem(-1)
+
+    def on_next_problem(self, sender, args):
+        self._move_problem(1)
+
+    def _highlight_pair_number(self, pair, zoom=False):
+        clear_problem_highlight()
+        if zoom:
+            names, items = geometry_for_group_names(context(), ['w%da' % pair, 'w%db' % pair])
+            if items:
+                Selection.Create(items).SetActive()
+                window = SCWindow.ActiveWindow
+                if window is not None:
+                    window.ZoomSelection()
+                Selection.Empty().SetActive()
+        groups, items_count = highlight_pair(context(), pair, False)
+        self.details.Text = ('w%d highlighted: A blue / B red | groups=%d | items=%d' %
+                             (pair, groups, items_count))
+
+    def on_highlight_selected(self, sender, args):
+        try:
+            pair = self.selected_pair_number()
+            if pair is None:
+                self.details.Text = 'Select a weld row first.'
+                return
+            self._highlight_pair_number(pair, zoom=False)
+        except Exception:
+            self.details.Text = traceback.format_exc()
+            log_event(self.details.Text)
+
+    def on_zoom_selected(self, sender, args):
+        try:
+            pair = self.selected_pair_number()
+            if pair is None:
+                self.details.Text = 'Select a weld row first.'
+                return
+            self._highlight_pair_number(pair, zoom=True)
+        except Exception:
+            self.details.Text = traceback.format_exc()
+            log_event(self.details.Text)
+
+    def _confirm_repair(self, title, text):
+        return MessageBox.Show(self, text, title, MessageBoxButtons.YesNo,
+                               MessageBoxIcon.Warning) == DialogResult.Yes
+
+    def _after_repair(self, pair, message):
+        try:
+            Selection.Empty().SetActive()
+        except Exception:
+            pass
+        self.records = validate_weld_named_selections(context(), self.metric_tolerance)
+        self.refresh_grid()
+        self.select_pair_row(pair)
+        try:
+            self._highlight_pair_number(pair, zoom=False)
+        except Exception:
+            log_event('REPAIR post-highlight warning: ' + traceback.format_exc())
+        self.details.Text = message + '\r\nRevalidated w%d. Review the updated status before continuing.' % pair
+
+    def on_repair_side(self, side, operation):
+        try:
+            record = self.selected_record()
+            if record is None:
+                self.details.Text = 'Select a weld row first.'
+                return
+            side = side.lower()
+            group_name = record.get('%s_name' % side)
+            if not group_name:
+                self.details.Text = ('w%d%s is missing. Use Create Missing %s.' %
+                                     (record['pair'], side, side.upper()))
+                return
+            selected, selected_kind = _repair_selection_items()
+            expected_kind = repair_expected_kind(record, side)
+            _validate_repair_kind(selected, expected_kind)
+            existing = repair_existing_items(record, side)
+            if operation == 'replace':
+                new_items = list(selected)
+                action = 'Replace'
+            elif operation == 'add':
+                new_items = repair_merge_items(existing, selected)
+                action = 'Add selection to'
+            elif operation == 'remove':
+                new_items = repair_remove_items(existing, selected)
+                action = 'Remove selection from'
+                if len(new_items) == len(existing):
+                    self.details.Text = 'None of the currently selected objects belongs to %s.' % group_name
+                    return
+                if not new_items:
+                    self.details.Text = ('Repair cancelled: removing the selected geometry would leave %s empty. '
+                                         'Use Replace instead.') % group_name
+                    return
+            else:
+                raise ValueError('Unknown repair operation: ' + str(operation))
+            new_items = _unique_items(new_items)
+            prompt = (('%s %s?\n\nOld geometry: %d %s\nCurrent SpaceClaim selection: %d %s\nResult: %d %s\n\n'
+                       'This changes the Named Selection in the active model. Continue?') %
+                      (action, group_name, len(existing), record.get('%s_kind' % side),
+                       len(selected), selected_kind, len(new_items), expected_kind or selected_kind))
+            if not self._confirm_repair('Repair ' + group_name, prompt):
+                self.details.Text = 'Repair cancelled.'
+                return
+            actual, count, kind = replace_named_selection_geometry(context(), group_name, new_items,
+                                                                    expected_kind)
+            log_event('REPAIR UI: %s | operation=%s | result=%d' % (actual, operation, count))
+            self._after_repair(record['pair'], '%s completed: %s now contains %d %s.' %
+                               (action, actual, count, kind))
+        except ValueError as error:
+            self.details.Text = str(error)
+            log_event('REPAIR INPUT: ' + str(error))
+        except Exception:
+            self.details.Text = traceback.format_exc()
+            log_event('REPAIR ERROR: ' + self.details.Text)
+
+    def on_create_missing(self, side):
+        try:
+            record = self.selected_record()
+            if record is None:
+                self.details.Text = 'Select a weld row first.'
+                return
+            side = side.lower()
+            existing_name = record.get('%s_name' % side)
+            if existing_name:
+                self.details.Text = '%s already exists.' % existing_name
+                return
+            selected, selected_kind = _repair_selection_items()
+            expected_kind = repair_expected_kind(record, side)
+            _validate_repair_kind(selected, expected_kind)
+            target = repair_target_name(record, side)
+            prompt = (('Create missing Named Selection %s?\n\nCurrent selection: %d %s\n\n'
+                       'This creates a new group in the active model. Continue?') %
+                      (target, len(selected), selected_kind))
+            if not self._confirm_repair('Create ' + target, prompt):
+                self.details.Text = 'Creation cancelled.'
+                return
+            actual, count, kind = create_missing_named_selection(context(), target, selected,
+                                                                  expected_kind)
+            log_event('REPAIR UI: create missing | %s | items=%d' % (actual, count))
+            self._after_repair(record['pair'], 'Created %s with %d %s.' % (actual, count, kind))
+        except ValueError as error:
+            self.details.Text = str(error)
+            log_event('REPAIR INPUT: ' + str(error))
+        except Exception:
+            self.details.Text = traceback.format_exc()
+            log_event('REPAIR ERROR: ' + self.details.Text)
+
+    def on_highlight_conflict(self, sender, args):
+        try:
+            record = self.selected_record()
+            if record is None:
+                self.details.Text = 'Select a weld row first.'
+                return
+            conflict_items = list(record.get('conflict_items', []))
+            conflict_groups = list(record.get('conflict_groups', []))
+            if not conflict_items:
+                self._highlight_pair_number(record['pair'], zoom=False)
+                self.details.Text = 'w%d has no reusable-geometry conflict to highlight.' % record['pair']
+                return
+            # Pair remains A=blue / B=red; exact conflicting geometry is overlaid orange.
+            self._highlight_pair_number(record['pair'], zoom=False)
+            count = set_problem_overlay(conflict_items)
+            groups_text = ', '.join(conflict_groups) if conflict_groups else 'A/B internal duplicate'
+            self.details.Text = (('w%d conflict highlighted in orange: %d object(s), %d primitive(s).\r\n'
+                                  'Also used by: %s') %
+                                 (record['pair'], len(conflict_items), count, groups_text))
+            log_event('QA HIGHLIGHT CONFLICT: w%d | items=%d | primitives=%d | groups=%s' %
+                      (record['pair'], len(conflict_items), count, groups_text))
+        except Exception:
+            self.details.Text = traceback.format_exc()
+            log_event(self.details.Text)
+
+    def on_export(self, sender, args):
+        try:
+            if not self.records:
+                self.on_validate(None, None)
+            dialog = SaveFileDialog()
+            dialog.Filter = 'CSV files (*.csv)|*.csv|All files (*.*)|*.*'
+            dialog.FileName = 'SpaceClaim_Weld_Named_Selection_QA.csv'
+            if dialog.ShowDialog(self) != DialogResult.OK:
+                return
+            with io.open(dialog.FileName, 'w', encoding='utf-8') as stream:
+                stream.write(u'Weld,A,B,TypeA,TypeB,CountA,CountB,MetricDiffPercent,Status,Reason\n')
+                for r in self.records:
+                    diff = '' if r['metric_diff'] is None else ('%.6g' % r['metric_diff'])
+                    reason = str(r['reason']).replace('"', '""')
+                    stream.write(u'w%d,%s,%s,%s,%s,%d,%d,%s,%s,"%s"\n' %
+                                 (r['pair'], r['a_name'], r['b_name'], r['a_kind'], r['b_kind'],
+                                  r['a_count'], r['b_count'], diff, r['status'], reason))
+            self.details.Text = 'CSV exported: ' + dialog.FileName
+            log_event('QA CSV exported: ' + dialog.FileName)
+        except Exception:
+            self.details.Text = traceback.format_exc()
+            log_event(self.details.Text)
+
 class WeldNamerForm(Form):
     def __init__(self):
         Form.__init__(self)
-        self.Text = 'MF | SpaceClaim Weld Namer 0.10 STABLE'
-        self.ClientSize = Size(465, 438)
+        self.Text = 'MF | SpaceClaim Weld Namer 0.12.0'
+        self.ClientSize = Size(465, 486)
         self.FormBorderStyle = FormBorderStyle.FixedToolWindow
         self.StartPosition = FormStartPosition.CenterScreen
         self.TopMost = True
@@ -282,7 +1508,7 @@ class WeldNamerForm(Form):
         self.owner_thread_id = Thread.CurrentThread.ManagedThreadId
 
         self.caption = Label()
-        self.caption.Text = 'Choose Faces or Edges, select geometry, then Create Next.\nSecondary highlight marks existing weld geometry in blue.'
+        self.caption.Text = 'Choose Faces or Edges, select geometry, then Create Next.\nA = blue, B = red. QA/Repair Manager highlights problems orange and can repair groups.'
         self.caption.Location = Point(12, 10)
         self.caption.Size = Size(440, 38)
 
@@ -336,20 +1562,27 @@ class WeldNamerForm(Form):
         self.clear_highlight.Click += self.on_clear_highlight
 
         self.output = TextBox()
-        self.output.Location = Point(12, 264)
-        self.output.Size = Size(441, 156)
+        self.manager = Button()
+        self.manager.Text = 'Named Selection QA / Repair Manager'
+        self.manager.Location = Point(12, 262)
+        self.manager.Size = Size(441, 34)
+        self.manager.Click += self.on_manager
+
+        self.output.Location = Point(12, 308)
+        self.output.Size = Size(441, 160)
         self.output.Multiline = True
         self.output.ReadOnly = True
         self.output.ScrollBars = ScrollBars.Vertical
 
         for control in (self.caption, self.mode_label, self.mode, self.create, self.refresh,
                         self.auto_highlight, self.highlight_pair_btn, self.highlight_all,
-                        self.clear_highlight, self.output):
+                        self.clear_highlight, self.manager, self.output):
             self.Controls.Add(control)
 
+        self.manager_form = None
         self.output.Text = ('Ready on host UI thread %s.\r\n'
-                            'Auto highlight defaults to the pair just created.\r\n'
-                            'Log: %s') % (Thread.CurrentThread.ManagedThreadId, LOG_PATH)
+                            'Auto highlight defaults to the pair just created.\r\nQA Manager: validation + orange problem highlight.\r\n'
+                            'Repair Manager: Replace/Add/Remove/Create Missing + conflict highlight.\r\nLog: %s') % (Thread.CurrentThread.ManagedThreadId, LOG_PATH)
         log_event('Window ready')
 
     def assert_ui_thread(self):
@@ -391,7 +1624,7 @@ class WeldNamerForm(Form):
         try:
             self.assert_ui_thread()
             groups, items = highlight_weld_groups(context(), False)
-            self.output.Text = 'Highlighted ALL weld groups: %d | Geometry items: %d | Secondary selection = blue' % (groups, items)
+            self.output.Text = 'Highlighted ALL weld groups: %d | Geometry items: %d | A = blue / B = red' % (groups, items)
         except ValueError as error:
             self.output.Text = str(error)
             log_event('INPUT: ' + str(error))
@@ -402,8 +1635,21 @@ class WeldNamerForm(Form):
     def on_clear_highlight(self, sender, args):
         try:
             self.assert_ui_thread()
-            clear_weld_highlight()
-            self.output.Text = 'Weld highlight cleared.'
+            clear_all_weld_overlays()
+            self.output.Text = 'All highlight cleared (A blue + B red + QA orange).'
+        except Exception:
+            self.output.Text = traceback.format_exc()
+            log_event(self.output.Text)
+
+    def on_manager(self, sender, args):
+        try:
+            self.assert_ui_thread()
+            if self.manager_form is not None and not self.manager_form.IsDisposed:
+                self.manager_form.Activate()
+                return
+            self.manager_form = NamedSelectionManagerForm(self)
+            self.manager_form.Show(self)
+            log_event('QA Manager opened')
         except Exception:
             self.output.Text = traceback.format_exc()
             log_event(self.output.Text)
@@ -432,8 +1678,8 @@ class WeldNamerForm(Form):
 # Do not use Show() on the script worker, ShowDialog(), Application.Run(),
 # an independent STA thread, synchronous Invoke(), Join(), or DoEvents loops.
 # BeginInvoke returns immediately, allowing the script runner to finish.
-STATE_KEY = 'MF.SpaceClaim.WeldNamer.v010.State'
-STATE_LOCK = String.Intern('MF.SpaceClaim.WeldNamer.v010.StateLock')
+STATE_KEY = 'MF.SpaceClaim.WeldNamer.v011.State'
+STATE_LOCK = String.Intern('MF.SpaceClaim.WeldNamer.v011.StateLock')
 
 def find_host_dispatch():
     process = Process.GetCurrentProcess()

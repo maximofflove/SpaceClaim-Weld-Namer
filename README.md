@@ -1,201 +1,181 @@
 # SpaceClaim Weld Namer
 
-A compact scripting utility for **ANSYS SpaceClaim 2021 R1 / Script API V19** that creates sequential Named Selection groups for weld-preparation workflows and highlights already prepared weld geometry.
+A semi-automatic weld Named Selection creation, visualization, QA and repair utility for **ANSYS SpaceClaim 2021 R1 / Script API V19 / IronPython 2.7**.
 
-The current stable release is **v0.10.0**. It has been validated on the author's real SpaceClaim 2021 R1 installation for the **Edges** workflow, including `DesignEdgeGeneral`, window reopen behavior, sequential group creation, Secondary Selection highlighting, current-pair highlighting, and Auto Highlight.
+**Current stable release: v0.12.0**
 
-> SpaceClaim Weld Namer is a SpaceClaim script. It is not a DLL Add-In and not an ACT extension.
+> SpaceClaim Weld Namer is a SpaceClaim script. It is not an ACT extension and not a compiled DLL Add-In.
 
+![SpaceClaim Weld Namer v0.12.0](docs/images/v012_main_window.png)
 
-## Why I built this
+## Why this tool exists
 
-This utility came out of a real engineering task rather than a standalone programming exercise.
+The utility was created for large detailed structural submodels containing many welded joints. In this workflow every weld is prepared as a pair of Named Selections:
 
-While preparing a **large detailed submodel with a large number of welded joints**, I found that manually creating and naming paired Named Selections for every weld quickly became repetitive and easy to get wrong. In the downstream Mechanical model, these selections are needed again for connection generation, checking, and weld-force post-processing.
+```text
+w1a / w1b
+w2a / w2b
+w3a / w3b
+...
+```
 
-The scripting possibilities available through **Python / IronPython in ANSYS and SpaceClaim** still keep surprising me. Even in SpaceClaim 2021 R1, a relatively small script can remove a significant amount of repetitive model-tree work without taking the engineering decision away from the user.
+Manually creating, naming and checking dozens or hundreds of these pairs becomes repetitive and easy to get wrong. SpaceClaim Weld Namer keeps the engineering decision with the user — the engineer selects the real geometry — while automating the naming, bookkeeping, visualization and QA around it.
 
-So the idea behind SpaceClaim Weld Namer is deliberately **semi-automatic**:
+The Named Selections can then be transferred to **ANSYS Mechanical** and used with the companion **MPC184 Viewer** workflow.
 
-- the engineer still selects the actual weld geometry;
-- the script creates the next `wNa / wNb` Named Selection;
-- the current weld pair can be highlighted immediately for visual checking;
-- the resulting Named Selections can then be transferred into **ANSYS Mechanical** and used directly in the workflow with **MPC184 Viewer**.
+## Main workflow
 
-In other words, the tool does not try to identify welds by itself. It automates the repetitive naming and bookkeeping around weld geometry while keeping geometry selection under engineer control.
+```text
+Select weld geometry in SpaceClaim
+        ↓
+Create Next
+        ↓
+wNa / wNb Named Selections
+        ↓
+A side = blue, B side = red
+        ↓
+QA / Repair Manager
+        ↓
+ANSYS Mechanical
+        ↓
+MPC184 Viewer
+```
 
-### Example model that motivated the tool
+## v0.12.0 highlights
 
-A typical case is a large submodel containing many local welded connections that must be prepared consistently before connection generation in Mechanical.
+### Sequential Named Selection creation
 
-![Large structural submodel](docs/images/large_submodel_overview.png)
-
-The current-pair highlight helps verify exactly which edges have already been assigned to a weld pair:
-
-![Current weld pair highlighted](docs/images/current_pair_highlight.png)
-
-Named Selections are created in a predictable sequence and are then available downstream in Mechanical:
-
-![Sequential weld Named Selections](docs/images/named_selections_tree.png)
-
-## What it does
-
-Select one or more edges and click **Create Next**. One Named Selection is created using the first free name in the sequence:
+The first free name is determined automatically:
 
 ```text
 w1a -> w1b -> w2a -> w2b -> ... -> w99999999b
 ```
 
-Several selected geometry items are stored in one group. Existing weld groups are not overwritten. Matching is case-insensitive and gaps are filled automatically.
+- case-insensitive existing-name detection;
+- gaps are filled automatically;
+- several selected edges or faces can be stored in one group;
+- normal creation does not overwrite existing weld groups;
+- numbering is recalculated from the actual root-part groups every time.
 
-The next name is recalculated from the Named Selection groups of the **root part on every operation**. There is no separate persistent numbering counter.
+### Independent A/B visualization
 
-## Stable v0.10 features
+- `w...a` is shown with the proven SpaceClaim **Secondary Selection** highlight (blue on the tested installation);
+- `w...b` is drawn as a temporary **red `Display.Graphic`** overlay;
+- CAD/body colors are not modified;
+- `Highlight Current Pair`, `Highlight All Weld Groups` and Auto Highlight use the same A/B convention;
+- `Clear Highlight` clears both visualization channels.
 
-- Sequential `wNa / wNb` naming.
-- Gap-aware numbering and case-insensitive detection of existing weld groups.
-- Multiple selected edges in one Named Selection.
-- `Edges` mode validated with `DesignEdgeGeneral`.
-- `Faces` mode implemented but not yet validated on the real target installation.
-- Modeless WinForms UI.
-- Safe close/reopen behavior.
-- Duplicate-window suppression when the script is run repeatedly.
-- Exact weld visualization using **SpaceClaim Secondary Selection** rather than permanent CAD color changes.
-- **Auto highlight current pair after Create**.
-- **Highlight Current Pair**.
-- **Highlight All Weld Groups**.
-- **Clear Highlight**.
-- Faces/Edges and Auto Highlight state retained between window reopen events within the same SpaceClaim session.
-- Diagnostic log: `%TEMP%\SpaceClaim_Weld_Namer_v010.log`.
+![A/B weld pair highlight](docs/images/v012_ab_pair_highlight.png)
 
-## Current-pair workflow
+### Named Selection QA Manager
 
-The tool is designed for preparing the two sides of a weld as a pair:
+The QA Manager scans weld groups and presents them as pairs in a table.
 
-```text
-Create w5a -> highlight w5a
-Create w5b -> highlight w5a + w5b
-Create w6a -> highlight switches to w6a
-```
+Checks include:
 
-This avoids turning a large model into one dense highlight when hundreds of weld groups already exist. **Highlight All Weld Groups** remains available when a global check is needed.
+- missing `A` or `B` side;
+- empty/unresolved Named Selection;
+- mixed or unsupported geometry type;
+- A/B type mismatch;
+- the same geometry used in both A and B;
+- geometry reused by another weld group;
+- duplicate group names ignoring case;
+- sequence gaps;
+- edge-length / face-area mismatch above the screening tolerance (default 10%).
 
-## Why Secondary Selection is used
+A/B object-count difference is displayed as **information**, not automatically treated as an error, because one physical weld side may be partitioned into a different number of topological edges/faces.
 
-A color-based prototype accepted edge selections but did not provide the required per-edge visual result on the target SpaceClaim installation. The stable tool therefore does not modify CAD colors.
+Available review functions include:
 
-Secondary Selection:
+- **Validate All**;
+- **Show Problems Only**;
+- **Highlight Problems** in orange;
+- **Previous Problem / Next Problem**;
+- **Highlight Selected Pair**;
+- **Zoom Selected Pair**;
+- **Export CSV**.
 
-1. highlights the exact topology stored in the Named Selection groups;
-2. does not modify CAD appearance properties;
-3. can be cleared independently;
-4. is treated as visualization post-processing, so a highlight problem does not invalidate a Named Selection already created successfully.
+![QA / Repair Manager](docs/images/v012_qa_repair_manager.png)
 
-## Companion project: MPC184 Viewer
+> QA status is a geometry/model-preparation screening result. It is not an engineering weld acceptance assessment.
 
-SpaceClaim Weld Namer is especially useful together with **MPC184 Viewer** for ANSYS Mechanical:
+### Controlled Repair Manager
 
-**MPC184 Viewer:** https://github.com/maximofflove/MPC184Viewer
+The selected weld pair can be repaired using the current SpaceClaim primary selection:
 
-A practical workflow is:
+- **Replace A / Replace B**;
+- **Add to A / Add to B**;
+- **Remove from A / Remove from B**;
+- **Create Missing A / Create Missing B**;
+- **Highlight Conflict** for reused geometry.
 
-```text
-SpaceClaim Weld Namer
--> create weld-side Named Selections w1a / w1b / w2a / w2b / ...
--> transfer/update the model in ANSYS Mechanical
--> MPC184 Viewer
--> create, validate, visualize, and post-process MPC184 weld connections
-```
+Repair operations validate the selected geometry type, request confirmation, execute the mutation, re-read the Named Selection and verify the resulting geometry before the QA table is refreshed.
 
-The two projects are independent, but their weld-group naming workflow is designed to work conveniently together.
+Existing Named Selections are changed with the V19 scripting command `NamedSelection.Replace(...)`; `Group.Members` is deliberately treated as read-only.
+
+## Real SpaceClaim validation
+
+v0.12.0 was promoted from the test build after successful use on the real target installation:
+
+- **ANSYS SpaceClaim 2021 R1**;
+- **Script API V19**;
+- built-in **IronPython 2.7**;
+- large Edge-based weld model;
+- at least **104 weld Named Selection groups / 346 geometry items** exercised by the global highlight during the validation session;
+- A/B blue/red visualization confirmed;
+- QA / Repair Manager opened and operated successfully;
+- repair workflow reported by the user as working successfully.
+
+Faces support is implemented, including face-area QA and red boundary rendering, but the public validation claim for v0.12.0 remains primarily the real **Edges** workflow unless separately tested.
+
+See [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## Requirements
 
 - ANSYS SpaceClaim **2021 R1**
 - Script API **V19**
-- Built-in **IronPython 2.7**
-- The **root component / root part must be active** before creating weld groups
+- built-in **IronPython 2.7**
+- root component / root part active when creating or repairing weld groups
 
-Other SpaceClaim versions may work but are not validated by this release.
+Other SpaceClaim versions may work, but are not claimed as validated by this release.
 
 ## Quick start
 
-1. Open the SpaceClaim model.
-2. Activate the **root component**.
-3. Open `Weld_Namer.py` in the SpaceClaim Script Editor.
-4. Select **API V19**.
-5. Run the complete script.
-6. Select `Edges` or `Faces` in the tool window.
-7. Select one or more geometry items of that type.
-8. Click **Create Next**.
+1. Open the SpaceClaim model and activate the **root component**.
+2. Open `Weld_Namer.py` in the SpaceClaim Script Editor.
+3. Select **API V19**.
+4. Run the complete script.
+5. Choose `Edges` or `Faces`.
+6. Select geometry and click **Create Next**.
+7. Use **Named Selection QA / Repair Manager** to validate, navigate, highlight and repair weld pairs.
 
-Use **Check Next Name** to inspect the next available weld-group name without modifying the model.
+The stable log is written to:
 
-## UI
+```text
+%TEMP%\SpaceClaim_Weld_Namer_v012.log
+```
 
-- `Faces` / `Edges`
-- **Create Next**
-- **Check Next Name**
-- **Auto highlight current pair after Create**
-- **Highlight Current Pair**
-- **Highlight All Weld Groups**
-- **Clear Highlight**
-- Message / diagnostic field
+## Important API behavior retained from validation
 
-## Naming behavior
-
-| Existing groups | Next group |
-|---|---|
-| none | `w1a` |
-| `w1a` | `w1b` |
-| `w1a`, `w1b` | `w2a` |
-| `W1A`, `w1b`, `w2a` | `w2b` |
-| `w1b` | `w1a` |
-| `w1a`, `w2a` | `w1b` |
-
-Only names matching `w<number>a` or `w<number>b` participate in the sequence.
-
-## Validated core API chain
-
-The creation path intentionally retains the calls confirmed on the target installation:
+The normal creation chain remains intentionally conservative:
 
 ```text
 Selection.GetActive()
--> NamedSelection.GetGroups(root)
--> NamedSelection.Create(selection, Selection.Empty())
--> verify exactly one new group
--> NamedSelection.Rename(temporary_name, target)
+NamedSelection.GetGroups(root)
+NamedSelection.Create(selection, Selection.Empty())
+NamedSelection.Rename(temporary_name, target)
 ```
 
-Important V19 observations:
+Important target-installation observations:
 
-- `Part.Groups` is not available in the tested API.
-- `NamedSelection.GetGroups(root)` works reliably.
-- Parameterless `NamedSelection.GetGroups()` previously produced a null-reference failure from the modeless callback.
-- The WinForms UI is created on the SpaceClaim UI thread through `BeginInvoke`.
-- Window state is stored in `AppDomain` and synchronized with `Monitor`.
+- `Part.Groups` is not available in the tested environment;
+- `NamedSelection.GetGroups(root)` is used explicitly;
+- parameterless `NamedSelection.GetGroups()` previously failed from the modeless callback;
+- the WinForms UI is launched on the SpaceClaim UI thread through `BeginInvoke`;
+- AppDomain state + `Monitor` prevent duplicate windows during repeated script runs;
+- `Window.Rendering` getter can throw while the custom rendering slot is empty, therefore the stable overlay path writes the property directly and refreshes the window without reading the getter first.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Validation status
-
-| Function | Status |
-|---|---|
-| Edges / `DesignEdgeGeneral` | **Validated on real SpaceClaim 2021 R1** |
-| Multiple edges in one group | **Validated** |
-| Sequential creation and continuation | **Validated** |
-| Window close -> run -> reopen | **Validated** |
-| Duplicate-window suppression | **Validated** |
-| Secondary Selection weld highlight | **Validated** |
-| Auto highlight current pair | **Validated** |
-| Highlight Current Pair | **Validated** |
-| Highlight All Weld Groups | **Validated** |
-| Auto Highlight state after reopen | **Validated** |
-| Faces mode | Not yet validated |
-| Publish Script as Tool | Not yet validated |
-| Hotkey assignment | Not yet validated |
-
-See [docs/VALIDATION.md](docs/VALIDATION.md) for the detailed matrix.
 
 ## Repository layout
 
@@ -206,52 +186,36 @@ SpaceClaim-Weld-Namer/
 ├── README_RU.md
 ├── CHANGELOG.md
 ├── RELEASE_NOTES.md
+├── VERSION
 ├── LICENSE
 ├── SUPPORT.md
-├── .github/
-│   └── FUNDING.yml
-├── .gitignore
-├── .gitattributes
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── VALIDATION.md
 │   ├── RELEASE_CHECKLIST.md
-│   └── images/                 # README screenshots
+│   ├── DEVELOPMENT_NOTES.md
+│   └── images/
 └── tools/
-    ├── Create_Next_Once.py
     ├── API_Diagnostics.py
-    └── Allow_Reopen.py
+    ├── Allow_Reopen.py
+    ├── Create_Next_Once.py
+    ├── Weld_Highlight_API_Diagnostics.py
+    ├── Weld_Highlight_API_Diagnostics_v2.py
+    └── Weld_NamedSelection_Repair_API_Diagnostics.py
 ```
 
-## Diagnostic tools
+## Companion project
 
-- `tools/Create_Next_Once.py` — one-shot group creation without the WinForms window.
-- `tools/API_Diagnostics.py` — target API diagnostics.
-- `tools/Allow_Reopen.py` — emergency state reset after an abnormal launch failure; not required for normal close/reopen operation.
+**MPC184 Viewer:** https://github.com/maximofflove/MPC184Viewer
 
-## Roadmap
-
-- Validate `Faces` mode end-to-end.
-- Test **Publish Script as Tool** in SpaceClaim 2021 R1.
-- Check shortcut conflicts before assigning any hotkey.
-- Consider Add-In/ACT packaging only after the scripting workflow is fully mature.
+SpaceClaim Weld Namer prepares `wNa / wNb` geometry groups; MPC184 Viewer uses the downstream Mechanical model to create, validate, visualize and post-process MPC184 weld connections.
 
 ## License
 
-SpaceClaim Weld Namer is free and open-source software released under the **GNU General Public License v3.0 (GPL-3.0)**.
+GNU General Public License v3.0. See [LICENSE](LICENSE).
 
-You may use the tool free of charge, including for professional and commercial engineering work, subject to the terms of the GPL-3.0 license. The source code may be studied, modified, and redistributed under those terms. See [LICENSE](LICENSE).
+## Support
 
-## Support the project
+The project is completely free and open source. Optional voluntary support:
 
-If SpaceClaim Weld Namer saves you time in engineering work and you would like to support further development, you can make a voluntary donation through Boosty:
-
-**Support on Boosty:** https://boosty.to/ansys2021/donate
-
-Support is completely optional. No payment or subscription is required to download the tool or access any feature. See [SUPPORT.md](SUPPORT.md).
-
-## Disclaimer
-
-This project is an independent engineering utility and is not an official ANSYS product. ANSYS and SpaceClaim are trademarks of their respective owners.
-
-Always validate generated Named Selections in the actual engineering model before using them in downstream analysis or automation.
+**https://boosty.to/ansys2021/donate**

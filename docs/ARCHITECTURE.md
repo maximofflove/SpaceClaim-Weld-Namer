@@ -1,12 +1,10 @@
-# Architecture and API Notes
+# Architecture and API Notes — v0.12.0
 
-## Design goal
+## Design principle
 
-SpaceClaim Weld Namer remains a small SpaceClaim script while the workflow is mature and validated. v0.10.0 is not an ACT extension and not a compiled Add-In.
+The project favors predictable mutations that have been confirmed on the target SpaceClaim 2021 R1 / API V19 installation. Diagnostic reflection is used to learn the API; production code avoids speculative signatures.
 
-The architecture prioritizes predictable model mutation over abstraction: the Named Selection creation path uses the API calls confirmed on the target SpaceClaim 2021 R1 / V19 installation.
-
-## 1. Naming model
+## 1. Naming
 
 The sequence is:
 
@@ -14,110 +12,121 @@ The sequence is:
 w1a, w1b, w2a, w2b, ...
 ```
 
-Each existing weld group is mapped to an occupied sequence index. The first free index becomes the next group name.
+Existing matching names are converted to occupied sequence positions and the first free slot is used. No persistent numeric counter is required.
 
-Consequences:
+## 2. Root-group enumeration
 
-- no external counter is required;
-- deleting a group makes its position available again;
-- gaps are filled automatically;
-- case is ignored;
-- unrelated Named Selections do not affect weld numbering.
-
-## 2. Root-part group enumeration
-
-The target installation established that enumeration should use:
+Stable enumeration uses:
 
 ```python
 NamedSelection.GetGroups(root)
 ```
 
-Rejected for the target environment:
+The target installation established:
 
-- `Part.Groups` — unavailable in the tested API;
-- parameterless `NamedSelection.GetGroups()` — previously caused a null-reference failure from the modeless form callback.
+- `Part.Groups` is unavailable;
+- parameterless `NamedSelection.GetGroups()` can fail from the modeless callback;
+- explicit root-part enumeration is reliable.
 
-`GetGroups(root)` is therefore an invariant of the stable implementation.
-
-## 3. Creation transaction
-
-The stable mutation path is:
+## 3. Normal creation transaction
 
 ```text
-read current selection
-validate geometry type
-read root groups before creation
+read primary selection
+validate Faces / Edges
+read root groups before
 calculate next name
-NamedSelection.Create(...)
-read root groups after creation
-verify exactly one new group
+NamedSelection.Create(selection, Selection.Empty())
+read root groups after
+verify exactly one group was added
 NamedSelection.Rename(temporary_name, target)
-verify final group set
+verify rename
 ```
 
-The code does not retry model mutation with alternative API signatures. Reflection is used only for diagnostics.
+The normal creation path does not retry mutations using guessed alternate signatures.
 
-## 4. Modeless window and UI thread
+## 4. Modeless UI lifecycle
 
-Creating the WinForms form directly from the script execution thread previously produced a frozen window.
+Direct `Form.Show()` from the script execution thread previously produced a frozen form. The stable implementation schedules form creation through WinForms `BeginInvoke` on the SpaceClaim UI thread.
 
-The stable solution creates the form through `BeginInvoke` on the SpaceClaim host UI thread.
+Window/session state is kept in `AppDomain` and synchronized with `Monitor`. Repeated script runs while the window is queued/open do not create duplicate forms.
 
-Repeated presses of Run are handled through application `AppDomain` state synchronized with `Monitor`.
+## 5. A/B visualization
 
-Conceptual phases:
+### A side
+
+A-side geometry uses SpaceClaim Secondary Selection:
+
+```python
+Selection.Create(a_items).SetActiveSecondary()
+```
+
+### B side
+
+The user's V19 reflection probe confirmed:
+
+- `DesignEdge.Shape -> Modeler.Edge`;
+- `Modeler.Edge` implements `ITrimmedCurve`;
+- `CurvePrimitive.Create(ITrimmedCurve)`;
+- `GraphicStyle.LineColor` and `LineWidth`;
+- writable `Window.Rendering`.
+
+B-side geometry is therefore rendered as a temporary red `Display.Graphic`.
+
+For Face groups, the overlay is drawn on the boundary edges of the selected Faces so the parent body's CAD color is not changed.
+
+### `Window.Rendering` null getter behavior
+
+A real target test showed that the `Window.Rendering` getter can throw when the custom-rendering slot has not been initialized. Direct assignment works:
 
 ```text
-none -> queued -> open -> closed -> queued -> open ...
+window.Rendering = graphic
+window.RefreshRendering()
 ```
 
-A launch request received while `queued` or `open` is ignored. `FormClosed` clears the live form reference and changes the phase to `closed`, allowing a later Run to create a fresh window.
+The stable overlay state therefore avoids reading that getter. Red B graphics and orange QA graphics are composed in application state and written as one combined Graphic.
 
-Faces/Edges and Auto Highlight preferences are kept in the same session state.
+## 6. QA screening
 
-## 5. Visualization
+The QA scan builds a case-insensitive weld-group map, resolves each group's geometry, tracks geometry usage across groups and calculates pair-level records.
 
-### Rejected approach: CAD color
+For Edge pairs the comparison metric is total curve length; for Face pairs it is total area. The relative difference is only a screening value.
 
-The v0.7 color experiment completed without exceptions but did not visibly mark the required individual edges on the real target model.
+The code also protects against accidental very large sequence gaps: it does not generate millions of missing rows if a high-number weld group appears unexpectedly.
 
-Permanent CAD color is therefore not used for weld visualization.
+## 7. Controlled repair
 
-### Stable approach: Secondary Selection
-
-Named Selection geometry is resolved and placed in SpaceClaim Secondary Selection.
-
-Benefits:
-
-- exact topology stored by the weld groups is highlighted;
-- no helper geometry is generated;
-- CAD appearance is not modified;
-- highlight can be cleared independently.
-
-Highlighting is post-processing. Creation is complete after the successful rename/verification chain; a later highlight error must not invalidate that model change.
-
-## 6. Current-pair highlighting in v0.10
-
-Automatic visualization is limited to the pair associated with the group just created.
-
-Example:
+The repair API probe confirmed:
 
 ```text
-Create w5a -> resolve pair w5 -> highlight w5a
-Create w5b -> resolve pair w5 -> highlight w5a + w5b
-Create w6a -> resolve pair w6 -> highlight w6a
+NamedSelection.Replace(name, primary, secondary, ICommandInfo)
+NamedSelection.Delete(names[])
 ```
 
-Manual **Highlight Current Pair** uses the same pair-resolution logic. **Highlight All Weld Groups** remains available for global review.
+and that `Group.Members` is read-only.
 
-This behavior was validated on the real SpaceClaim 2021 R1 installation before v0.10.0 was promoted to stable.
+Existing groups are therefore changed via `NamedSelection.Replace(...)`, not by mutating `Members`.
 
-## 7. Compatibility strategy
+Repair sequence:
 
-The project currently targets exactly:
+```text
+read current primary selection
+validate homogeneous Edges or Faces
+construct desired final item list
+ask for confirmation
+NamedSelection.Replace(...)
+re-read group via Selection.CreateByGroups(...)
+compare actual and expected geometry keys
+refresh QA
+```
+
+Creating a missing A/B side reuses the already validated Create + Rename model, followed by explicit geometry verification.
+
+## 8. Compatibility
+
+Validated target:
 
 - SpaceClaim 2021 R1
 - Script API V19
 - IronPython 2.7
 
-Compatibility statements for other versions should be added only after real validation or clearly identified as unverified.
+Compatibility with other releases should be claimed only after real testing.

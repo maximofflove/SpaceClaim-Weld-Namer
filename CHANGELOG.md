@@ -1,59 +1,75 @@
 # Changelog
 
+## v0.12.0 — Stable — 2026-09-16
+
+Promoted to stable after successful validation on the real SpaceClaim 2021 R1 / API V19 installation.
+
+Added since v0.10.0:
+
+- independent A/B visualization:
+  - A via Secondary Selection;
+  - B via red temporary `Display.Graphic`;
+- combined overlay state and reliable clear behavior;
+- **Named Selection QA Manager**;
+- validation of missing/empty groups, geometry types, reuse/conflicts, sequence gaps and A/B metric mismatch;
+- orange **Highlight Problems**;
+- **Show Problems Only**;
+- **Previous / Next Problem** navigation;
+- **Highlight Selected Pair** and **Zoom Selected Pair**;
+- QA CSV export;
+- controlled **Repair Manager**:
+  - Replace A / B;
+  - Add to A / B;
+  - Remove from A / B;
+  - Create Missing A / B;
+  - Highlight Conflict;
+- post-repair geometry verification and automatic revalidation.
+
+Confirmed V19 API behavior used by this release:
+
+- `Display.CurvePrimitive.Create(ITrimmedCurve)`;
+- `GraphicStyle.LineColor` / `LineWidth`;
+- writable `Window.Rendering` plus `RefreshRendering()`;
+- `NamedSelection.Replace(name, primary, secondary, ...)` for existing group contents;
+- `Group.Members` is read-only.
+
+Real target validation included a large Edge-based model; a global highlight processed 104 weld groups / 346 geometry items during the recorded session.
+
+## v0.11 — QA Manager Test
+
+- introduced tabular weld-pair QA;
+- orange problem highlighting;
+- problem navigation and CSV export;
+- retained A-blue / B-red visualization.
+
 ## v0.10.0 — Stable — 2026-09-11
 
-Promoted to stable after successful testing on the real SpaceClaim 2021 R1 installation.
-
-Added:
-
-- **Auto highlight current pair after Create**.
-- **Highlight Current Pair**.
-- **Highlight All Weld Groups** wording for the global highlight command.
-- Current-pair calculation based on the first free sequential weld name.
-- Persistence of Auto Highlight state within the SpaceClaim session.
-- Current-pair information in **Check Next Name**.
-- Diagnostic log `%TEMP%\SpaceClaim_Weld_Namer_v010.log`.
-
-Validated on the real target installation:
-
-- current-pair highlight after creating side `a`;
-- complete pair highlight after creating side `b`;
-- manual **Highlight Current Pair**;
-- **Highlight All Weld Groups**;
-- Auto Highlight behavior;
-- close/reopen with retained Auto Highlight state;
-- existing v0.9 Edges/reopen/Secondary Selection workflow.
-
-The proven Named Selection create/rename chain was retained unchanged.
+- Auto highlight current pair after Create;
+- Highlight Current Pair;
+- Highlight All Weld Groups;
+- current-pair calculation based on the first free sequential name;
+- modeless window reopen/duplicate suppression retained;
+- Secondary Selection visualization validated.
 
 ## v0.9 — Stable
 
-- Promoted Secondary Selection highlighting to the stable baseline.
-- Edges/reopen/highlight confirmed on real SpaceClaim 2021 R1.
-- Exact weld geometry can be highlighted without modifying CAD color.
+- promoted Secondary Selection highlighting to the stable baseline.
 
 ## v0.8 — Highlight Test
 
-- Replaced ineffective per-edge CAD color visualization with Secondary Selection.
-- Added weld-group highlight and clear-highlight controls.
+- replaced ineffective per-edge CAD color visualization with Secondary Selection.
 
 ## v0.7 — Color Test
 
-- Experimental color-based visualization.
-- API calls completed without exception but did not provide the required per-edge visual result on the target model.
-- Color approach abandoned for weld visualization.
+- experimental color-based visualization; abandoned because it did not provide the required per-edge visual result.
 
 ## v0.6 — Reopen Fix
 
-- Fixed stale window lock after closing the form.
-- Window can be reopened by running the script again.
-- Duplicate launch requests while queued/open are suppressed.
-- Faces/Edges selection mode retained in the SpaceClaim session.
+- fixed stale window lock after close and duplicate launch behavior.
 
 ## v0.5 — Validated Creation Baseline
 
-- Confirmed creation of `w1a` and `w1b` from selected edges.
-- Established the creation chain retained by later versions:
+Established the creation chain retained by later versions:
 
 ```text
 Selection.GetActive()
