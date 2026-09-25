@@ -1,12 +1,42 @@
-# SpaceClaim Weld Namer
+# SpaceClaim Named Selection Namer
 
-A semi-automatic weld Named Selection creation, visualization, QA and repair utility for **ANSYS SpaceClaim 2021 R1 / Script API V19 / IronPython 2.7**.
+A semi-automatic Named Selection tool for welds, bolt joints and Mechanical Face Meshing in **SpaceClaim 2021 R1 / API V19 / IronPython 2.7**. Weld groups also have QA and repair controls.
 
-**Current stable release: v0.12.0**
+**Current release: v0.13.1**
 
-> SpaceClaim Weld Namer is a SpaceClaim script. It is not an ACT extension and not a compiled DLL Add-In.
+> SpaceClaim script for the Script Editor. It is not an ACT extension or DLL.
 
-![SpaceClaim Weld Namer v0.12.0](docs/images/v012_main_window.png)
+## Name sequences
+
+| Purpose | Geometry | Sequence | Highlight |
+| --- | --- | --- | --- |
+| Weld Pair | Faces or Edges | `w1a`, `w1b` … `w99999999b` | A blue, B red |
+| Bolt Pair | Edges | `f1a`, `f1b` … `f999999b` | A blue, B red |
+| Mechanical Face Meshing | Faces | `fm1` … `fm999999999` | Blue |
+
+Select geometry and press **Create Next**. All selected items enter one group. Naming is case insensitive, fills gaps independently for each purpose and leaves existing groups intact. **Check Next Name** shows the next name in the selected mode. Auto highlight, Highlight Current and Highlight All follow the selected purpose; **Clear Highlight** removes the temporary colors. Weld QA / Repair applies only to `w` groups.
+
+The user confirmed Bolt Pair and Face Meshing creation and highlighting in SpaceClaim 2021 R1. See [validation scope](docs/VALIDATION.md) for details.
+
+## Interface screenshots — v0.13.1
+
+Real screenshots from SpaceClaim 2021 R1.
+
+**Weld Pair** — sequential weld groups and current pair:
+
+![Weld Pair mode in v0.13.1](docs/images/v0131_weld_pair_window.png)
+
+**Bolt Pair** — Edge groups `fNa/fNb`:
+
+![Bolt Pair mode in v0.13.1](docs/images/v0131_bolt_pair_window.png)
+
+**Face Meshing** — Face groups `fmN`:
+
+![Face Meshing mode in v0.13.1](docs/images/v0131_face_meshing_window.png)
+
+**Weld Named Selection QA / Repair Manager** — an example screening table from the user's model. CHECK rows need review in their model context.
+
+![Weld QA and Repair Manager in v0.13.1](docs/images/v0131_weld_qa_repair_manager.png)
 
 ## Why this tool exists
 
@@ -41,7 +71,7 @@ ANSYS Mechanical
 MPC184 Viewer
 ```
 
-## v0.12.0 highlights
+## Weld workflow inherited from v0.12.0
 
 ### Sequential Named Selection creation
 

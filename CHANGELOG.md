@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.13.1 — 2026-09-25
+
+- Bolt pairs `fNa/fNb` can be highlighted: A via blue Secondary Selection and B via a red temporary overlay.
+- Face Meshing groups `fmN` can be highlighted blue individually or all at once.
+- Auto Highlight follows the selected purpose; switching purpose clears the previous highlight.
+- User confirmed Bolt Pair, Mechanical Face Meshing and their highlights work in SpaceClaim 2021 R1.
+
+## v0.13.0 — 2026-09-25
+
+- Added separate name sequences for Bolt Pair (Edges, `f1a/f1b` to `f999999a/f999999b`) and Mechanical Face Meshing (Faces, `fm1` to `fm999999999`).
+- Weld naming, visualization and QA remain available.
+
+## v0.12.1 — 2026-09-24
+
+- Added root-part group enumeration fallback for an empty document, where the V19 scripting `GetGroups(root)` raised a null reference.
+- The user's log confirmed the fallback and subsequent creation of `w1a/w1b`.
+
+
 ## v0.12.0 — Stable — 2026-09-16
 
 Promoted to stable after successful validation on the real SpaceClaim 2021 R1 / API V19 installation.

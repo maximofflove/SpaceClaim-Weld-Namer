@@ -1,4 +1,20 @@
-# Validation Matrix — v0.12.0
+# Validation Matrix — v0.13.1
+
+Target: SpaceClaim 2021 R1, Script API V19, IronPython 2.7.
+
+## User confirmed in SpaceClaim
+
+| Workflow | Evidence |
+| --- | --- |
+| Bolt Pair creation from Edges (`f…a/f…b`) | User reported it works in v0.13.0 |
+| Face Meshing creation from Faces (`fm…`) | User reported it works in v0.13.0 |
+| Bolt Pair highlight | User reported v0.13.1 works |
+| Face Meshing highlight | User reported v0.13.1 works |
+| Empty-root fallback and `w1a/w1b` creation | User log dated 2026-09-24 |
+
+The earlier real-model weld checks below belong to v0.12.0. Specific boundary cases such as the maximum `f` / `fm` number and other SpaceClaim versions were not run on the target installation. The v0.13.1 source parsed and the name routing / highlight selection were checked with isolated mocks.
+
+# Historical weld validation — v0.12.0
 
 Target environment:
 

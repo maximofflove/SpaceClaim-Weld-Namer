@@ -1,11 +1,60 @@
 # Python Script, API Version = V19
 # -*- coding: utf-8 -*-
-# SpaceClaim Weld Namer 0.12.0 STABLE - IronPython 2.7, SpaceClaim script editor.
+# SpaceClaim Named Selection Namer 0.13.1 - IronPython 2.7, SpaceClaim script editor.
 import re
 import sys
 import traceback
 
 MAX_PAIR = 99999999
+BOLT_MAX_PAIR = 999999
+FACE_MESH_MAX = 999999999
+WELD_MODE = 'Weld pair (w)'
+BOLT_MODE = 'Bolt pair (f)'
+FACE_MESH_MODE = 'Face Meshing (fm)'
+
+def next_group_name(names, purpose):
+    if purpose == WELD_MODE:
+        return next_name(names)
+    if purpose == BOLT_MODE:
+        pattern = re.compile(r'^f([1-9][0-9]*)([ab])$', re.I)
+        occupied = set()
+        for value in names:
+            match = pattern.match(str(value))
+            if match:
+                number = int(match.group(1))
+                if number <= BOLT_MAX_PAIR:
+                    occupied.add(2 * (number - 1) + (match.group(2).lower() == 'b'))
+        index = 0
+        while index in occupied:
+            index += 1
+        if index >= 2 * BOLT_MAX_PAIR:
+            raise ValueError('All bolt names are occupied.')
+        return 'f%d%s' % (index // 2 + 1, 'ab'[index % 2])
+    if purpose == FACE_MESH_MODE:
+        pattern = re.compile(r'^fm([1-9][0-9]*)$', re.I)
+        occupied = set()
+        for value in names:
+            match = pattern.match(str(value))
+            if match:
+                number = int(match.group(1))
+                if number <= FACE_MESH_MAX:
+                    occupied.add(number)
+        number = 1
+        while number in occupied:
+            number += 1
+        if number > FACE_MESH_MAX:
+            raise ValueError('All Face Meshing names are occupied.')
+        return 'fm%d' % number
+    raise ValueError('Select a Named Selection purpose.')
+
+def geometry_mode(purpose, weld_mode):
+    if purpose == WELD_MODE:
+        return weld_mode
+    if purpose == BOLT_MODE:
+        return 'Edges'
+    if purpose == FACE_MESH_MODE:
+        return 'Faces'
+    raise ValueError('Select a Named Selection purpose.')
 
 def next_name(names, maximum=MAX_PAIR):
     occupied = set()
@@ -44,10 +93,24 @@ def all_groups(root):
     if root is None:
         raise ValueError('Open a design and activate its root component.')
     log_event('GROUPS: call NamedSelection.GetGroups(root)')
-    groups = NamedSelection.GetGroups(root)
-    if groups is None:
-        raise RuntimeError('GetGroups(root) returned null. No group will be created.')
-    result = list(groups)
+    try:
+        groups = NamedSelection.GetGroups(root)
+        if groups is None:
+            raise RuntimeError('GetGroups(root) returned null.')
+        result = list(groups)
+    except Exception:
+        # The scripting command may lose its document context in a modeless
+        # WinForms callback. Read the same root part through the document API.
+        log_event('GROUPS: scripting API failed; trying root.GetChildren[Group](): '
+                  + traceback.format_exc())
+        try:
+            from SpaceClaim.Api.V19 import Group
+            result = list(root.GetChildren[Group]())
+        except Exception:
+            log_event('GROUPS: document API failed: ' + traceback.format_exc())
+            raise RuntimeError('Cannot read Named Selection groups from the active root part. '
+                               'No group was created. Close the Namer window, activate the '
+                               'root component, run the script again, and send the log: ' + LOG_PATH)
     for group in result:
         if not hasattr(group, 'Name'):
             raise RuntimeError('GetGroups(root) returned an object without Name.')
@@ -484,6 +547,83 @@ def highlight_current_pair(root, clear_primary=False):
     groups, items = highlight_pair(root, pair_number, clear_primary)
     return pair_number, groups, items, target
 
+def current_bolt_pair_from_names(names):
+    target = next_group_name(names, BOLT_MODE)
+    match = re.match(r'^f([1-9][0-9]*)([ab])$', target)
+    number = int(match.group(1))
+    if match.group(2) == 'b' or ('f%db' % number) in set(str(n).lower() for n in names):
+        return number, target
+    return (number - 1 if number > 1 else None), target
+
+def highlight_bolt_pair(root, number, clear_primary=False):
+    clear_problem_highlight()
+    if clear_primary:
+        Selection.Empty().SetActive()
+    if number is None:
+        Selection.Empty().SetActiveSecondary()
+        clear_red_weld_overlay()
+        return 0, 0
+    a_names, a_items = geometry_for_group_names(root, ['f%da' % number])
+    b_names, b_items = geometry_for_group_names(root, ['f%db' % number])
+    if a_items:
+        Selection.Create(a_items).SetActiveSecondary()
+    else:
+        Selection.Empty().SetActiveSecondary()
+    set_red_weld_overlay(b_items)
+    log_event('BOLT HIGHLIGHT: f%d | A=%d items | B=%d items' %
+              (number, len(a_items), len(b_items)))
+    return len(a_names) + len(b_names), len(a_items) + len(b_items)
+
+def highlight_all_bolt_groups(root, clear_primary=False):
+    clear_problem_highlight()
+    if clear_primary:
+        Selection.Empty().SetActive()
+    a_names, a_items, b_names, b_items = [], [], [], []
+    for group in all_groups(root):
+        name = str(group.Name)
+        match = re.match(r'^f[1-9][0-9]*([ab])$', name, re.I)
+        if not match:
+            continue
+        selected = Selection.CreateByGroups(name)
+        items = [] if selected is None else list(selected.Items)
+        if not items:
+            log_event('BOLT HIGHLIGHT WARNING: %s contains no selectable geometry' % name)
+            continue
+        if match.group(1).lower() == 'a':
+            a_names.append(name)
+            a_items.extend(items)
+        else:
+            b_names.append(name)
+            b_items.extend(items)
+    if a_items:
+        Selection.Create(a_items).SetActiveSecondary()
+    else:
+        Selection.Empty().SetActiveSecondary()
+    set_red_weld_overlay(b_items)
+    return len(a_names) + len(b_names), len(a_items) + len(b_items)
+
+def face_mesh_names(root):
+    result = []
+    for group in all_groups(root):
+        name = str(group.Name)
+        match = re.match(r'^fm([1-9][0-9]*)$', name, re.I)
+        if match and int(match.group(1)) <= FACE_MESH_MAX:
+            result.append((int(match.group(1)), name))
+    return result
+
+def highlight_face_mesh_groups(root, requested_names, clear_primary=False):
+    clear_problem_highlight()
+    if clear_primary:
+        Selection.Empty().SetActive()
+    found, items = geometry_for_group_names(root, requested_names)
+    if items:
+        Selection.Create(items).SetActiveSecondary()
+    else:
+        Selection.Empty().SetActiveSecondary()
+    clear_red_weld_overlay()
+    log_event('FACE MESH HIGHLIGHT: groups=%d | items=%d' % (len(found), len(items)))
+    return len(found), len(items)
+
 
 def _doc_item_key(item):
     try:
@@ -915,8 +1055,9 @@ def repair_remove_items(existing, selected):
     remove_keys = set(_doc_item_key(item) for item in selected)
     return [item for item in existing if _doc_item_key(item) not in remove_keys]
 
-def create_next(mode="Faces", auto_highlight=True):
+def create_next(mode="Faces", auto_highlight=True, purpose=WELD_MODE):
     log_event('CREATE: begin')
+    mode = geometry_mode(purpose, mode)
     root = context()
     log_event('CREATE: read selection')
     selection = Selection.GetActive()
@@ -924,7 +1065,7 @@ def create_next(mode="Faces", auto_highlight=True):
     validate_items(items, mode)
     log_event('CREATE: read groups before')
     before = all_groups(root)
-    target = next_name([str(g.Name) for g in before])
+    target = next_group_name([str(g.Name) for g in before], purpose)
     # Create once only. Never retry a mutation with another signature.
     log_event('CREATE: call NamedSelection.Create | target=' + target)
     log_creation_signatures()
@@ -953,13 +1094,24 @@ def create_next(mode="Faces", auto_highlight=True):
     highlight_note = ' | Auto highlight: OFF'
     if auto_highlight:
         try:
-            pair_number = pair_number_from_name(target)
-            group_count, item_count = highlight_pair(root, pair_number, True)
-            highlight_note = ' | Auto highlight: w%d (%d groups / %d items)' % (pair_number, group_count, item_count)
+            if purpose == WELD_MODE:
+                pair_number = pair_number_from_name(target)
+                group_count, item_count = highlight_pair(root, pair_number, True)
+                highlighted = 'w%d' % pair_number
+            elif purpose == BOLT_MODE:
+                pair_number = int(re.match(r'^f([1-9][0-9]*)[ab]$', target).group(1))
+                group_count, item_count = highlight_bolt_pair(root, pair_number, True)
+                highlighted = 'f%d' % pair_number
+            else:
+                group_count, item_count = highlight_face_mesh_groups(root, [target], True)
+                highlighted = target
+            highlight_note = ' | Auto highlight: %s (%d groups / %d items)' % (
+                highlighted, group_count, item_count)
         except Exception:
             log_event('HIGHLIGHT ERROR after create %s: %s' % (target, traceback.format_exc()))
             highlight_note = ' | Auto highlight: FAILED (group is OK)'
-    return 'Created %s | %s: %d | Next: %s%s' % (target, mode, len(items), next_name(names_in(root)), highlight_note)
+    return 'Created %s | %s: %d | Next: %s%s' % (target, mode, len(items),
+               next_group_name(names_in(root), purpose), highlight_note)
 
 import clr
 clr.AddReference('System.Windows.Forms')
@@ -997,7 +1149,7 @@ class NamedSelectionManagerForm(Form):
     def __init__(self, parent_form):
         Form.__init__(self)
         self.parent_form = parent_form
-        self.Text = 'MF | Weld Named Selection QA / Repair Manager 0.12.0'
+        self.Text = 'MF | Weld Named Selection QA / Repair Manager 0.12.1'
         self.ClientSize = Size(1080, 720)
         self.FormBorderStyle = FormBorderStyle.SizableToolWindow
         self.StartPosition = FormStartPosition.CenterParent
@@ -1498,8 +1650,8 @@ class NamedSelectionManagerForm(Form):
 class WeldNamerForm(Form):
     def __init__(self):
         Form.__init__(self)
-        self.Text = 'MF | SpaceClaim Weld Namer 0.12.0'
-        self.ClientSize = Size(465, 486)
+        self.Text = 'MF | SpaceClaim Named Selection Namer 0.13.1'
+        self.ClientSize = Size(465, 536)
         self.FormBorderStyle = FormBorderStyle.FixedToolWindow
         self.StartPosition = FormStartPosition.CenterScreen
         self.TopMost = True
@@ -1508,18 +1660,32 @@ class WeldNamerForm(Form):
         self.owner_thread_id = Thread.CurrentThread.ManagedThreadId
 
         self.caption = Label()
-        self.caption.Text = 'Choose Faces or Edges, select geometry, then Create Next.\nA = blue, B = red. QA/Repair Manager highlights problems orange and can repair groups.'
+        self.caption.Text = 'Choose a purpose, select geometry, then Create Next.\nPairs: A = blue, B = red. Face Meshing groups = blue.'
         self.caption.Location = Point(12, 10)
         self.caption.Size = Size(440, 38)
 
+        self.purpose_label = Label()
+        self.purpose_label.Text = 'Group purpose:'
+        self.purpose_label.Location = Point(12, 59)
+        self.purpose_label.Size = Size(120, 23)
+
+        self.purpose = ComboBox()
+        self.purpose.DropDownStyle = ComboBoxStyle.DropDownList
+        self.purpose.Location = Point(140, 55)
+        self.purpose.Size = Size(313, 25)
+        for name in (WELD_MODE, BOLT_MODE, FACE_MESH_MODE):
+            self.purpose.Items.Add(name)
+        self.purpose.SelectedIndex = 0
+        self.purpose.SelectedIndexChanged += self.on_purpose_changed
+
         self.mode_label = Label()
         self.mode_label.Text = 'Selection type:'
-        self.mode_label.Location = Point(12, 59)
+        self.mode_label.Location = Point(12, 99)
         self.mode_label.Size = Size(120, 23)
 
         self.mode = ComboBox()
         self.mode.DropDownStyle = ComboBoxStyle.DropDownList
-        self.mode.Location = Point(140, 55)
+        self.mode.Location = Point(140, 95)
         self.mode.Size = Size(180, 25)
         self.mode.Items.Add('Faces')
         self.mode.Items.Add('Edges')
@@ -1527,59 +1693,60 @@ class WeldNamerForm(Form):
 
         self.create = Button()
         self.create.Text = 'Create Next'
-        self.create.Location = Point(12, 95)
+        self.create.Location = Point(12, 135)
         self.create.Size = Size(215, 36)
         self.create.Click += self.on_create
 
         self.refresh = Button()
         self.refresh.Text = 'Check Next Name'
-        self.refresh.Location = Point(238, 95)
+        self.refresh.Location = Point(238, 135)
         self.refresh.Size = Size(215, 36)
         self.refresh.Click += self.on_refresh
 
         self.auto_highlight = CheckBox()
-        self.auto_highlight.Text = 'Auto highlight current pair after Create'
-        self.auto_highlight.Location = Point(12, 142)
+        self.auto_highlight.Text = 'Auto highlight after Create'
+        self.auto_highlight.Location = Point(12, 182)
         self.auto_highlight.Size = Size(320, 24)
         self.auto_highlight.Checked = True
 
         self.highlight_pair_btn = Button()
         self.highlight_pair_btn.Text = 'Highlight Current Pair'
-        self.highlight_pair_btn.Location = Point(12, 176)
+        self.highlight_pair_btn.Location = Point(12, 216)
         self.highlight_pair_btn.Size = Size(215, 34)
         self.highlight_pair_btn.Click += self.on_highlight_pair
 
         self.highlight_all = Button()
         self.highlight_all.Text = 'Highlight All Weld Groups'
-        self.highlight_all.Location = Point(238, 176)
+        self.highlight_all.Location = Point(238, 216)
         self.highlight_all.Size = Size(215, 34)
         self.highlight_all.Click += self.on_highlight_all
 
         self.clear_highlight = Button()
         self.clear_highlight.Text = 'Clear Highlight'
-        self.clear_highlight.Location = Point(12, 220)
+        self.clear_highlight.Location = Point(12, 260)
         self.clear_highlight.Size = Size(441, 32)
         self.clear_highlight.Click += self.on_clear_highlight
 
         self.output = TextBox()
         self.manager = Button()
-        self.manager.Text = 'Named Selection QA / Repair Manager'
-        self.manager.Location = Point(12, 262)
+        self.manager.Text = 'Weld Named Selection QA / Repair Manager'
+        self.manager.Location = Point(12, 302)
         self.manager.Size = Size(441, 34)
         self.manager.Click += self.on_manager
 
-        self.output.Location = Point(12, 308)
-        self.output.Size = Size(441, 160)
+        self.output.Location = Point(12, 348)
+        self.output.Size = Size(441, 170)
         self.output.Multiline = True
         self.output.ReadOnly = True
         self.output.ScrollBars = ScrollBars.Vertical
 
-        for control in (self.caption, self.mode_label, self.mode, self.create, self.refresh,
+        for control in (self.caption, self.purpose_label, self.purpose, self.mode_label, self.mode, self.create, self.refresh,
                         self.auto_highlight, self.highlight_pair_btn, self.highlight_all,
                         self.clear_highlight, self.manager, self.output):
             self.Controls.Add(control)
 
         self.manager_form = None
+        self.last_created_by_purpose = {}
         self.output.Text = ('Ready on host UI thread %s.\r\n'
                             'Auto highlight defaults to the pair just created.\r\nQA Manager: validation + orange problem highlight.\r\n'
                             'Repair Manager: Replace/Add/Remove/Create Missing + conflict highlight.\r\nLog: %s') % (Thread.CurrentThread.ManagedThreadId, LOG_PATH)
@@ -1589,14 +1756,41 @@ class WeldNamerForm(Form):
         if Thread.CurrentThread.ManagedThreadId != self.owner_thread_id:
             raise RuntimeError('UI thread mismatch; operation cancelled.')
 
+    def on_purpose_changed(self, sender, args):
+        purpose = str(self.purpose.SelectedItem)
+        clear_all_weld_overlays()
+        self.mode.Enabled = (purpose == WELD_MODE)
+        self.mode_label.Enabled = self.mode.Enabled
+        if purpose == BOLT_MODE:
+            self.mode.SelectedItem = 'Edges'
+        elif purpose == FACE_MESH_MODE:
+            self.mode.SelectedItem = 'Faces'
+        self.highlight_pair_btn.Text = ('Highlight Current Group' if purpose == FACE_MESH_MODE
+                                        else 'Highlight Current Pair')
+        self.highlight_all.Text = ('Highlight All Face Meshing' if purpose == FACE_MESH_MODE
+                                   else 'Highlight All Bolt Groups' if purpose == BOLT_MODE
+                                   else 'Highlight All Weld Groups')
+        self.manager.Enabled = (purpose == WELD_MODE)
+        self.output.Text = '%s | selection: %s' % (purpose, geometry_mode(purpose, str(self.mode.SelectedItem)))
+
     def on_refresh(self, sender, args):
         try:
             self.assert_ui_thread()
             root = context()
             names = names_in(root)
-            pair_number, target = current_pair_from_names(names)
-            pair_text = 'none' if pair_number is None else 'w%d' % pair_number
-            self.output.Text = 'Next: %s | Current pair: %s | Groups inspected: %d' % (target, pair_text, len(names))
+            purpose = str(self.purpose.SelectedItem)
+            if purpose == WELD_MODE:
+                pair_number, target = current_pair_from_names(names)
+                pair_text = 'none' if pair_number is None else 'w%d' % pair_number
+                self.output.Text = 'Next: %s | Current pair: %s | Groups inspected: %d' % (target, pair_text, len(names))
+            elif purpose == BOLT_MODE:
+                number, target = current_bolt_pair_from_names(names)
+                pair_text = 'none' if number is None else 'f%d' % number
+                self.output.Text = 'Next: %s | Current pair: %s | Groups inspected: %d' % (
+                    target, pair_text, len(names))
+            else:
+                self.output.Text = 'Next: %s | Selection: %s | Groups inspected: %d' % (
+                    next_group_name(names, purpose), geometry_mode(purpose, str(self.mode.SelectedItem)), len(names))
         except ValueError as error:
             self.output.Text = str(error)
             log_event('INPUT: ' + str(error))
@@ -1607,12 +1801,27 @@ class WeldNamerForm(Form):
     def on_highlight_pair(self, sender, args):
         try:
             self.assert_ui_thread()
-            pair_number, groups, items, target = highlight_current_pair(context(), False)
-            if pair_number is None:
-                self.output.Text = 'No current weld pair to highlight. Next: %s' % target
+            root = context()
+            purpose = str(self.purpose.SelectedItem)
+            if purpose == WELD_MODE:
+                pair_number, groups, items, target = highlight_current_pair(root, False)
+                label = 'w%d' % pair_number if pair_number is not None else 'none'
+            elif purpose == BOLT_MODE:
+                pair_number, target = current_bolt_pair_from_names(names_in(root))
+                groups, items = highlight_bolt_pair(root, pair_number, False)
+                label = 'f%d' % pair_number if pair_number is not None else 'none'
             else:
-                self.output.Text = ('Highlighted current pair w%d | Existing groups in pair: %d | '
-                                    'Geometry items: %d | Next: %s') % (pair_number, groups, items, target)
+                existing = face_mesh_names(root)
+                last = self.last_created_by_purpose.get(FACE_MESH_MODE)
+                actual = dict((name.lower(), name) for number, name in existing)
+                current = actual.get(str(last).lower()) if last else None
+                if current is None and existing:
+                    current = max(existing)[1]
+                groups, items = highlight_face_mesh_groups(root, [current] if current else [], False)
+                target = next_group_name(names_in(root), purpose)
+                label = current or 'none'
+            self.output.Text = ('Highlighted %s | Groups: %d | Geometry items: %d | Next: %s' %
+                                (label, groups, items, target))
         except ValueError as error:
             self.output.Text = str(error)
             log_event('INPUT: ' + str(error))
@@ -1623,8 +1832,18 @@ class WeldNamerForm(Form):
     def on_highlight_all(self, sender, args):
         try:
             self.assert_ui_thread()
-            groups, items = highlight_weld_groups(context(), False)
-            self.output.Text = 'Highlighted ALL weld groups: %d | Geometry items: %d | A = blue / B = red' % (groups, items)
+            root = context()
+            purpose = str(self.purpose.SelectedItem)
+            if purpose == WELD_MODE:
+                groups, items = highlight_weld_groups(root, False)
+            elif purpose == BOLT_MODE:
+                groups, items = highlight_all_bolt_groups(root, False)
+            else:
+                groups, items = highlight_face_mesh_groups(root,
+                                [name for number, name in face_mesh_names(root)], False)
+            legend = 'blue' if purpose == FACE_MESH_MODE else 'A = blue / B = red'
+            self.output.Text = 'Highlighted ALL %s: %d groups | %d items | %s' % (
+                purpose, groups, items, legend)
         except ValueError as error:
             self.output.Text = str(error)
             log_event('INPUT: ' + str(error))
@@ -1636,7 +1855,7 @@ class WeldNamerForm(Form):
         try:
             self.assert_ui_thread()
             clear_all_weld_overlays()
-            self.output.Text = 'All highlight cleared (A blue + B red + QA orange).'
+            self.output.Text = 'All highlight cleared (blue + red + QA orange).'
         except Exception:
             self.output.Text = traceback.format_exc()
             log_event(self.output.Text)
@@ -1661,7 +1880,12 @@ class WeldNamerForm(Form):
         self.create.Enabled = False
         try:
             self.assert_ui_thread()
-            self.output.Text = create_next(str(self.mode.SelectedItem), bool(self.auto_highlight.Checked))
+            purpose = str(self.purpose.SelectedItem)
+            result = create_next(str(self.mode.SelectedItem), bool(self.auto_highlight.Checked), purpose)
+            match = re.match(r'^Created ([^ |]+)', result)
+            if match:
+                self.last_created_by_purpose[purpose] = match.group(1)
+            self.output.Text = result
             log_event(self.output.Text)
         except ValueError as error:
             self.output.Text = str(error)
@@ -1716,8 +1940,9 @@ def schedule_window():
             return
         last_mode = state.get('mode', 'Faces') if state is not None else 'Faces'
         last_auto = state.get('auto_highlight', True) if state is not None else True
+        last_purpose = state.get('purpose', WELD_MODE) if state is not None else WELD_MODE
         state = {'phase': 'queued', 'form': None, 'callback': None,
-                 'mode': last_mode, 'auto_highlight': last_auto}
+                 'mode': last_mode, 'auto_highlight': last_auto, 'purpose': last_purpose}
         AppDomain.CurrentDomain.SetData(STATE_KEY, state)
     finally:
         Monitor.Exit(STATE_LOCK)
@@ -1732,6 +1957,8 @@ def schedule_window():
                 state['form'] = form
                 form.mode.SelectedItem = state['mode']
                 form.auto_highlight.Checked = bool(state.get('auto_highlight', True))
+                if state.get('purpose', WELD_MODE) in (WELD_MODE, BOLT_MODE, FACE_MESH_MODE):
+                    form.purpose.SelectedItem = state['purpose']
                 def closed(sender, args):
                     # Only close makes a new run eligible. Replays while open
                     # still return without Show/Activate or another callback.
@@ -1739,6 +1966,7 @@ def schedule_window():
                     try:
                         state['mode'] = str(form.mode.SelectedItem)
                         state['auto_highlight'] = bool(form.auto_highlight.Checked)
+                        state['purpose'] = str(form.purpose.SelectedItem)
                         state['form'] = None
                         state['phase'] = 'closed'
                     finally:

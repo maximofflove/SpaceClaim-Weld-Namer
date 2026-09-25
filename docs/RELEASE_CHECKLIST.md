@@ -36,8 +36,8 @@
 
 ## Packaging
 
-- [x] Source header = v0.12.0 STABLE.
-- [x] Window titles = v0.12.0.
+- [x] Source header = v0.13.1.
+- [x] Window titles = v0.13.1.
 - [x] Log file = `%TEMP%\\SpaceClaim_Weld_Namer_v012.log`.
 - [x] README / README_RU / CHANGELOG / RELEASE_NOTES updated.
 - [x] Real validation distinguished from static checks.
@@ -45,12 +45,19 @@
 - [x] Development logs and temporary reports excluded from repository root.
 - [x] Screenshots from real v0.12 validation included.
 
+## New workflows
+
+- [x] Bolt Edge pairs and Face Meshing Face groups use independent sequences.
+- [x] Auto / Current / All highlights follow selected purpose.
+- [x] User confirmed both new creation modes and highlights work in SpaceClaim 2021 R1.
+- [x] Weld QA / Repair is scoped to weld groups.
+
 ## GitHub release
 
 Recommended metadata:
 
 ```text
-Tag:    v0.12.0
+Tag:    v0.13.1
 Target: main
-Title:  SpaceClaim Weld Namer v0.12.0
+Title:  SpaceClaim Named Selection Namer v0.13.1
 ```

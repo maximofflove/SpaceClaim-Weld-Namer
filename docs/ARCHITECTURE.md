@@ -1,4 +1,4 @@
-# Architecture and API Notes — v0.12.0
+# Architecture and API Notes — v0.13.1
 
 ## Design principle
 
@@ -26,7 +26,7 @@ The target installation established:
 
 - `Part.Groups` is unavailable;
 - parameterless `NamedSelection.GetGroups()` can fail from the modeless callback;
-- explicit root-part enumeration is reliable.
+- explicit root-part enumeration works on populated parts; in an empty document it can throw and `root.GetChildren[Group]()` supplies a read-only fallback.
 
 ## 3. Normal creation transaction
 
@@ -130,3 +130,7 @@ Validated target:
 - IronPython 2.7
 
 Compatibility with other releases should be claimed only after real testing.
+
+## 8. Additional name sequences and highlighting
+
+The v0.13.x purpose selector routes name allocation independently: `wNa/wNb` for welds, `fNa/fNb` for bolt edges, and `fmN` for faces. All modes use the verified single Create and Rename path. Bolt A/B highlighting reuses the same temporary blue/red visual channels as welds. `fm` groups use blue Secondary Selection without the red overlay. Weld QA and repairs scan only `w` groups.

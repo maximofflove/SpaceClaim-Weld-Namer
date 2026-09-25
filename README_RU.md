@@ -1,12 +1,42 @@
-# SpaceClaim Weld Namer
+# SpaceClaim Named Selection Namer
 
-Полуавтоматическая утилита для создания, визуального контроля, QA-проверки и исправления сварочных Named Selection в **ANSYS SpaceClaim 2021 R1 / Script API V19 / IronPython 2.7**.
+Полуавтоматическое создание Named Selection для швов, болтовых соединений и Mechanical Face Meshing в **SpaceClaim 2021 R1 / API V19 / IronPython 2.7**. Для сварных групп доступны также QA-проверка и исправление.
 
-**Текущая стабильная версия: v0.12.0**
+**Текущая версия: v0.13.1**
 
-> Это скрипт SpaceClaim. Он не является ACT extension или скомпилированным DLL Add-In.
+> Скрипт для Script Editor в SpaceClaim. Не является ACT extension или DLL.
 
-![SpaceClaim Weld Namer v0.12.0](docs/images/v012_main_window.png)
+## Последовательности имён
+
+| Назначение | Геометрия | Имена | Подсветка |
+| --- | --- | --- | --- |
+| Weld Pair | Faces или Edges | `w1a`, `w1b` … `w99999999b` | A синяя, B красная |
+| Bolt Pair | Edges | `f1a`, `f1b` … `f999999b` | A синяя, B красная |
+| Mechanical Face Meshing | Faces | `fm1` … `fm999999999` | Синяя |
+
+Выберите геометрию и нажмите **Create Next**: все выбранные объекты попадут в одну группу. Каждая последовательность независимо заполняет пропуски, имена сравниваются без учёта регистра и существующие группы сохраняются. **Check Next Name** показывает следующее имя. Автоматическая подсветка, Highlight Current и Highlight All следуют выбранному назначению; **Clear Highlight** очищает временные цвета. QA / Repair Manager работает только со сварными группами `w`.
+
+Работу Bolt Pair и Face Meshing вместе с подсветкой пользователь подтвердил в SpaceClaim 2021 R1. Подробности — в [таблице проверок](docs/VALIDATION.md).
+
+## Скриншоты интерфейса v0.13.1
+
+Реальные снимки из SpaceClaim 2021 R1.
+
+**Weld Pair** — последовательные группы швов и текущая пара:
+
+![Режим Weld Pair v0.13.1](docs/images/v0131_weld_pair_window.png)
+
+**Bolt Pair** — группы рёбер `fNa/fNb`:
+
+![Режим Bolt Pair v0.13.1](docs/images/v0131_bolt_pair_window.png)
+
+**Face Meshing** — группы граней `fmN`:
+
+![Режим Face Meshing v0.13.1](docs/images/v0131_face_meshing_window.png)
+
+**Weld Named Selection QA / Repair Manager** — пример таблицы проверки модели пользователя. Строки CHECK требуют оценки с учётом конкретной модели.
+
+![Окно сварной QA и исправления v0.13.1](docs/images/v0131_weld_qa_repair_manager.png)
 
 ## Для чего создан инструмент
 
@@ -41,7 +71,7 @@ ANSYS Mechanical
 MPC184 Viewer
 ```
 
-## Возможности v0.12.0
+## Сварной режим, сохранённый от v0.12.0
 
 ### Последовательное создание Named Selection
 
