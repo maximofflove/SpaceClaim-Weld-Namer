@@ -1,4 +1,4 @@
-# Architecture and API Notes — v0.13.1
+# Architecture and API Notes — v0.14.1
 
 ## Design principle
 
@@ -133,4 +133,4 @@ Compatibility with other releases should be claimed only after real testing.
 
 ## 8. Additional name sequences and highlighting
 
-The v0.13.x purpose selector routes name allocation independently: `wNa/wNb` for welds, `fNa/fNb` for bolt edges, and `fmN` for faces. All modes use the verified single Create and Rename path. Bolt A/B highlighting reuses the same temporary blue/red visual channels as welds. `fm` groups use blue Secondary Selection without the red overlay. Weld QA and repairs scan only `w` groups.
+The purpose selector routes name allocation independently: `wNa/wNb` for welds, `ctktNa/ctktNb` for contact faces, `fNa/fNb` for bolt edges, and `fmN` for Face Meshing. All modes use the verified single Create and Rename path. Weld and Bolt A/B retain their blue/red visual channels; Contact uses muted-blue/sand face overlays; `fm` uses blue Secondary Selection. Weld QA/repair scans only `w` groups, while Contact QA/repair scans only `ctkt` groups. Both repair paths share the same `NamedSelection.Replace(...)` + post-read verification helper; Contact forces `Faces` as the expected geometry kind.

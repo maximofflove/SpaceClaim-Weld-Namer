@@ -1,158 +1,183 @@
 # SpaceClaim Named Selection Namer
 
-Полуавтоматическое создание Named Selection для швов, болтовых соединений и Mechanical Face Meshing в **SpaceClaim 2021 R1 / API V19 / IronPython 2.7**. Для сварных групп доступны также QA-проверка и исправление.
+Полуавтоматическая подготовка, проверка и исправление Named Selections для **ANSYS SpaceClaim 2021 R1 / Script API V19 / IronPython 2.7**.
 
-**Текущая версия: v0.13.1**
+**Текущая стабильная версия: v0.15.8**
 
-> Скрипт для Script Editor в SpaceClaim. Не является ACT extension или DLL.
+Инженер по-прежнему сам выбирает геометрию, а инструмент автоматизирует имена, подсветку, QA и контролируемое исправление четырёх типов групп:
 
-## Последовательности имён
-
-| Назначение | Геометрия | Имена | Подсветка |
+| Назначение | Геометрия | Последовательность | Подсветка |
 | --- | --- | --- | --- |
-| Weld Pair | Faces или Edges | `w1a`, `w1b` … `w99999999b` | A синяя, B красная |
-| Bolt Pair | Edges | `f1a`, `f1b` … `f999999b` | A синяя, B красная |
-| Mechanical Face Meshing | Faces | `fm1` … `fm999999999` | Синяя |
+| Weld pair | Faces или Edges | `w1a`, `w1b`, `w2a`, `w2b`, ... | A синяя, B красная |
+| Bolt pair | Edges | `f1a`, `f1b`, `f2a`, `f2b`, ... | A синяя, B красная |
+| Face Meshing | Faces | `fm1`, `fm2`, ... | синяя |
+| Contact pair | только Faces | `ctkt1a`, `ctkt1b`, `ctkt2a`, `ctkt2b`, ... | A приглушённо-синяя, B песочная |
 
-Выберите геометрию и нажмите **Create Next**: все выбранные объекты попадут в одну группу. Каждая последовательность независимо заполняет пропуски, имена сравниваются без учёта регистра и существующие группы сохраняются. **Check Next Name** показывает следующее имя. Автоматическая подсветка, Highlight Current и Highlight All следуют выбранному назначению; **Clear Highlight** очищает временные цвета. QA / Repair Manager работает только со сварными группами `w`.
+> Это скрипт для SpaceClaim Script Editor, а не ACT Extension и не DLL.
 
-Работу Bolt Pair и Face Meshing вместе с подсветкой пользователь подтвердил в SpaceClaim 2021 R1. Подробности — в [таблице проверок](docs/VALIDATION.md).
+## Что нового в v0.15.8
 
-## Скриншоты интерфейса v0.13.1
+Для `Contact pair (ctkt)` добавлен тот же контролируемый QA / Repair workflow, который используется для Weld pair. Для выбранной пары можно независимо по стороне A или B выполнить **Replace**, **Add**, **Remove** или **Create Missing**. Для `ctkt` ремонт намеренно ограничен **только Faces**. После изменения группа заново читается из модели и проверяется до обновления таблицы.
 
-Реальные снимки из SpaceClaim 2021 R1.
+Сохранена схема цветов v0.15.7: Weld и Bolt — синий/красный, Face Meshing — синий, Contact — приглушённо-синий/песочный.
 
-**Weld Pair** — последовательные группы швов и текущая пара:
+Подробности: [RELEASE_NOTES.md](RELEASE_NOTES.md) и [CHANGELOG.md](CHANGELOG.md).
 
-![Режим Weld Pair v0.13.1](docs/images/v0131_weld_pair_window.png)
+## Скриншоты интерфейса
 
-**Bolt Pair** — группы рёбер `fNa/fNb`:
+Ниже используются реальные изображения из рабочего SpaceClaim 2021 R1. Weld, Bolt и Face Meshing сняты на v0.15.7; Contact — уже на финальной v0.15.8 после проверки нового Contact QA / Repair workflow непосредственно в SpaceClaim.
 
-![Режим Bolt Pair v0.13.1](docs/images/v0131_bolt_pair_window.png)
+### Weld pair
 
-**Face Meshing** — группы граней `fmN`:
+Главное окно Weld на реальной модели:
 
-![Режим Face Meshing v0.13.1](docs/images/v0131_face_meshing_window.png)
+![Weld window v0.15.7](docs/images/v0157_weld_window.png)
 
-**Weld Named Selection QA / Repair Manager** — пример таблицы проверки модели пользователя. Строки CHECK требуют оценки с учётом конкретной модели.
+Сине-красная подсветка Weld pair:
 
-![Окно сварной QA и исправления v0.13.1](docs/images/v0131_weld_qa_repair_manager.png)
+![Weld highlight v0.15.7](docs/images/v0157_weld_highlight.png)
 
-## Для чего создан инструмент
+QA / Repair Manager с таблицей и кнопками Add/Remove/Replace/Create Missing:
 
-Утилита появилась из реальной задачи подготовки большой детализированной submodel с большим количеством сварных соединений. Для каждого шва формируется пара Named Selection:
+![Weld QA Repair](docs/images/v0157_weld_qa_repair.png)
+
+### Bolt pair
+
+Bolt mode после проверки существующих пар:
+
+![Bolt window v0.15.7](docs/images/v0157_bolt_window.png)
+
+Подсветка текущей A/B-пары:
+
+![Bolt pair highlight](docs/images/v0157_bolt_pair_highlight.png)
+
+Подсветка всех Bolt groups:
+
+![Bolt all highlight](docs/images/v0157_bolt_all_highlight.png)
+
+### Face Meshing
+
+Face Meshing и кнопка аудита существующих групп:
+
+![Face Meshing window v0.15.7](docs/images/v0157_face_meshing_window.png)
+
+Пример Face Meshing surfaces в модели:
+
+![Face Meshing model](docs/images/v0157_face_meshing_model.png)
+
+### Contact pair
+
+Финальный Contact mode v0.15.8 с активной кнопкой Contact QA / Repair Manager:
+
+![Contact window v0.15.8](docs/images/v0158_contact_window.png)
+
+Contact QA / Repair Manager на реальных группах `ctkt`. На скриншоте **Add to B** увеличивает `ctkt37b` до 8 Faces, после чего пара автоматически перечитывается и повторно валидируется:
+
+![Contact QA Repair v0.15.8](docs/images/v0158_contact_qa_repair.png)
+
+Старые подтверждённые скриншоты также оставлены в `docs/images/` как история разработки.
+
+## Быстрый старт
+
+1. Открыть модель в SpaceClaim и активировать **root component / root part**.
+2. Открыть `Weld_Namer.py` в Script Editor.
+3. Выбрать **API V19** и выполнить весь скрипт.
+4. Выбрать нужный **Group purpose**.
+5. Выделить геометрию в модели.
+6. Нажать **Create Next**.
+7. Использовать подсветку, audit или QA для выбранного режима.
+8. Для Weld и Contact pair открыть **Named Selection QA / Repair Manager**, если группу нужно исправить.
+
+Лог:
 
 ```text
-w1a / w1b
-w2a / w2b
-w3a / w3b
-...
+%TEMP%\SpaceClaim_Weld_Namer_v012.log
 ```
 
-При десятках и сотнях швов ручное создание, последовательное именование и проверка этих групп становится рутинной и легко приводит к ошибкам. При этом сам выбор геометрии должен оставаться инженерным решением.
+## Кнопки главного окна
 
-Поэтому SpaceClaim Weld Namer специально сделан **полуавтоматическим**: инженер выбирает нужные рёбра/грани, а программа берёт на себя именование, визуализацию, QA и контролируемое исправление групп.
+Полное описание каждой кнопки — в **[docs/USER_GUIDE_RU.md](docs/USER_GUIDE_RU.md)**. Краткая таблица:
 
-## Основной workflow
+| Элемент | Назначение |
+| --- | --- |
+| **Group purpose** | Переключает Weld, Bolt, Face Meshing и Contact. Для каждого режима своя независимая нумерация. |
+| **Selection type** | Edges/Faces там, где это допускается. Bolt — только Edges; Face Meshing и Contact — только Faces. |
+| **Create Next** | Создаёт первое свободное корректное имя. Существующие группы не перезаписываются. |
+| **Check Next Name** | Показывает следующее имя без изменения модели. |
+| **Auto highlight after Create** | После создания автоматически подсвечивает созданную пару/группу. |
+| **Show names of highlighted Named Selections** | Добавляет временные подписи к подсвеченной геометрии. |
+| **Label size (%)** | Масштаб временных подписей; CAD-геометрию не меняет. |
+| **Bolt axis tolerance (degrees)** | Допуск проверки оси Bolt pair. По умолчанию 1°. |
+| **Highlight Current Pair / Group** | Подсвечивает текущую логическую пару/группу. |
+| **Highlight All ...** | Подсвечивает все группы активного режима. |
+| **Clear Highlight** | Убирает подсветку пар, подписи и оранжевые QA-overlay. |
+| **Weld / Contact QA / Repair Manager** | Табличный QA, навигация, CSV и контролируемое исправление. |
+| **Check Existing Bolt Pairs** | Read-only проверка уже существующих Bolt pair. |
+| **Check Existing Face Meshing** | Read-only проверка повторного использования Faces в `fm`. |
+| **Find Groups for Selected Geometry** | Показывает группы активного режима, содержащие текущую выбранную геометрию. |
 
-```text
-Выбор геометрии шва в SpaceClaim
-        ↓
-Create Next
-        ↓
-wNa / wNb
-        ↓
-A = синяя подсветка, B = красная
-        ↓
-QA / Repair Manager
-        ↓
-ANSYS Mechanical
-        ↓
-MPC184 Viewer
-```
+## QA / Repair Manager
 
-## Сварной режим, сохранённый от v0.12.0
+Менеджер доступен для **Weld pair** и, начиная с v0.15.8, для **Contact pair**. В нём есть:
 
-### Последовательное создание Named Selection
-
-```text
-w1a -> w1b -> w2a -> w2b -> ... -> w99999999b
-```
-
-- поиск первого свободного имени без учёта регистра;
-- автоматическое заполнение пропусков;
-- несколько выбранных объектов в одной группе;
-- существующие weld-группы не перезаписываются обычной командой Create Next;
-- номер каждый раз определяется по реальным группам корневой детали, отдельного счётчика нет.
-
-### Раздельная подсветка A/B
-
-- `w...a` — штатная SpaceClaim **Secondary Selection** (на проверенной установке синяя);
-- `w...b` — временная **красная `Display.Graphic`**;
-- исходные цвета CAD-геометрии не изменяются;
-- Auto Highlight, `Highlight Current Pair` и `Highlight All Weld Groups` используют одинаковую схему;
-- `Clear Highlight` очищает обе подсветки.
-
-![Раздельная подсветка A/B](docs/images/v012_ab_pair_highlight.png)
-
-### Named Selection QA Manager
-
-QA Manager собирает сварочные группы по парам и проверяет:
-
-- отсутствие стороны A или B;
-- пустую / неразрешённую группу;
-- смешанный или неподдерживаемый тип геометрии;
-- различие типов A/B;
-- одну и ту же геометрию одновременно в A и B;
-- повторное использование геометрии другим weld Named Selection;
-- дубли имён без учёта регистра;
-- пропуски последовательности;
-- отличие суммарной длины Edges или площади Faces больше screening-допуска (по умолчанию 10%).
-
-Разница количества объектов A/B показывается как **информация**, а не автоматически как ошибка: физически корректные стороны одного шва могут быть по-разному разбиты топологией.
-
-Доступны:
-
-- **Validate All**;
-- **Show Problems Only**;
-- **Highlight Problems** — проблемные места оранжевым;
+- таблица пар A/B с типом геометрии, количеством объектов, относительным отличием метрики, статусом и причиной;
+- **Validate All** и **Show Problems Only**;
+- **Highlight Problems** / **Clear Problem Highlight** — оранжевая подсветка проблем;
 - **Previous Problem / Next Problem**;
-- **Highlight Selected Pair**;
-- **Zoom Selected Pair**;
-- **Export CSV**.
+- **Highlight Selected Pair** и **Zoom Selected Pair**;
+- **Export CSV**;
+- исправление по текущему primary selection SpaceClaim:
+  - **Replace A / Replace B**;
+  - **Add to A / Add to B**;
+  - **Remove from A / Remove from B**;
+  - **Create Missing A / Create Missing B**;
+  - **Highlight Conflict**.
 
-![QA / Repair Manager](docs/images/v012_qa_repair_manager.png)
+Для Contact pair ремонт принимает **только Faces**. Удаление блокируется, если после него Named Selection станет пустым. Любая мутация требует подтверждения, для существующей группы использует V19 `NamedSelection.Replace(...)`, затем повторно читает результат и запускает QA для пары.
 
-> QA-статус — это screening подготовки геометрии/модели, а не расчётная оценка допустимости сварного соединения.
+QA здесь — проверка подготовки геометрии/модели, а **не** инженерный расчёт приемлемости сварного шва, болта или контакта.
 
-### Controlled Repair Manager
+## Поведение по режимам
 
-Для выбранной пары можно использовать текущее primary selection SpaceClaim и выполнить:
+### Weld pair (`w`)
 
-- **Replace A / Replace B**;
-- **Add to A / Add to B**;
-- **Remove from A / Remove from B**;
-- **Create Missing A / Create Missing B**;
-- **Highlight Conflict** для повторно используемой геометрии.
+- нумерация без учёта регистра, пропуски заполняются;
+- Faces или Edges;
+- одна сторона может содержать несколько объектов;
+- A/B — синий/красный;
+- QA проверяет отсутствующие/пустые группы, тип геометрии, повторное использование A/B, использование в других weld-группах, дубли имён, пропуски последовательности, отличие длины/площади;
+- разница количества объектов A/B выводится как информация.
 
-Перед изменением проверяется тип геометрии и запрашивается подтверждение. После операции Named Selection перечитывается и фактический состав сравнивается с ожидаемым, затем QA обновляется.
+### Bolt pair (`f`)
 
-Для изменения существующей группы используется штатный V19 `NamedSelection.Replace(...)`. Свойство `Group.Members` рассматривается как read-only и напрямую не изменяется.
+- только Edges;
+- ожидается одна полная круговая кромка отверстия на сторону;
+- первая сторона может иметь статус **PENDING**, пока противоположная сторона не создана;
+- завершённая пара проверяется относительно нормалей прилегающих плоских пластин;
+- допуск по умолчанию 1°;
+- **Check Existing Bolt Pairs** выдаёт OK / ERROR / INCOMPLETE и не меняет группы.
 
-## Проверка в реальном SpaceClaim
+### Face Meshing (`fm`)
 
-v0.12.0 переведена в stable после успешной проверки на реальной установке:
+- только Faces;
+- Create Next останавливается, если выбранная поверхность уже входит в другую `fm`-группу;
+- **Check Existing Face Meshing** проверяет существующие группы и подсвечивает пересечения;
+- audit ничего не изменяет.
 
-- **ANSYS SpaceClaim 2021 R1**;
-- **Script API V19**;
-- встроенный **IronPython 2.7**;
-- большой Edge-based набор сварочных Named Selection;
-- при тесте общей подсветки обработано как минимум **104 weld-группы / 346 объектов геометрии**;
-- подтверждена синяя A / красная B подсветка;
-- QA / Repair Manager успешно работал;
-- пользователь подтвердил успешную работу Repair workflow.
+### Contact pair (`ctkt`)
 
-Поддержка Faces реализована, включая QA по площади и красную отрисовку границ Faces, но основной публично подтверждённый workflow v0.12.0 — **Edges**.
+- только Faces;
+- последовательное создание A/B;
+- приглушённо-синий/песочный специально отделяет Contact от Weld/Bolt;
+- поддерживаются временные подписи и поиск групп по выделенной геометрии;
+- v0.15.8 добавляет Contact QA / Repair Manager с контролируемыми Add/Remove/Replace/Create Missing;
+- инструмент создаёт и обслуживает Named Selections. Contact/Target и свойства контакта назначаются отдельно в Mechanical.
+
+## Статус проверки
+
+Стабильный Weld workflow проверен на реальной установке **SpaceClaim 2021 R1 / API V19 / IronPython 2.7**: большая Edge-based модель, A/B-подсветка, QA и Repair workflow.
+
+Для v0.15.8 проходят **23 локальных regression test**: 16 тестов Bolt geometry/mutation guard и 7 статических тестов маршрутизации Contact Repair. После этого Contact QA / Repair workflow был проверен пользователем непосредственно в **SpaceClaim 2021 R1 / API V19**. На присланном скриншоте `Add to B` обновляет `ctkt37b` до 8 Faces, после чего пара автоматически перечитывается и повторно валидируется. Поэтому v0.15.8 публикуется как стабильная версия.
 
 Подробнее: [docs/VALIDATION.md](docs/VALIDATION.md).
 
@@ -161,53 +186,39 @@ v0.12.0 переведена в stable после успешной провер�
 - ANSYS SpaceClaim **2021 R1**
 - Script API **V19**
 - встроенный **IronPython 2.7**
-- при создании/исправлении групп активна корневая деталь / root component
+- активная корневая деталь / root part при создании и исправлении
 
-Другие версии SpaceClaim могут работать, но в v0.12.0 это не заявляется как подтверждённая совместимость.
+Другие версии SpaceClaim могут работать, но не заявлены как проверенные этой версией.
 
-## Быстрый старт
-
-1. Открыть модель и активировать **root component**.
-2. Открыть `Weld_Namer.py` в Script Editor.
-3. Выбрать **API V19**.
-4. Выполнить весь файл.
-5. Выбрать `Edges` или `Faces`.
-6. Выбрать геометрию и нажать **Create Next**.
-7. Для проверки и исправления открыть **Named Selection QA / Repair Manager**.
-
-Лог стабильной версии:
+## Структура репозитория
 
 ```text
-%TEMP%\SpaceClaim_Weld_Namer_v012.log
+SpaceClaim-Weld-Namer/
+├── Weld_Namer.py
+├── README.md
+├── README_RU.md
+├── CHANGELOG.md
+├── RELEASE_NOTES.md
+├── VERSION
+├── LICENSE
+├── SUPPORT.md
+├── docs/
+│   ├── USER_GUIDE.md
+│   ├── USER_GUIDE_RU.md
+│   ├── ARCHITECTURE.md
+│   ├── VALIDATION.md
+│   ├── RELEASE_CHECKLIST.md
+│   ├── DEVELOPMENT_NOTES.md
+│   └── images/
+├── tests/
+└── tools/
 ```
-
-## Сохранённая рабочая API-цепочка
-
-Обычное создание Named Selection по-прежнему использует проверенную цепочку:
-
-```text
-Selection.GetActive()
-NamedSelection.GetGroups(root)
-NamedSelection.Create(selection, Selection.Empty())
-NamedSelection.Rename(temporary_name, target)
-```
-
-Важные особенности проверенной установки:
-
-- `Part.Groups` отсутствует;
-- используется явный `NamedSelection.GetGroups(root)`;
-- `NamedSelection.GetGroups()` без аргумента ранее приводил к null-reference из modeless callback;
-- WinForms создаётся на UI-потоке SpaceClaim через `BeginInvoke`;
-- AppDomain + `Monitor` предотвращают дубли окна при повторном Run;
-- getter `Window.Rendering` может падать, когда custom-rendering slot пуст, поэтому стабильная overlay-логика записывает `Window.Rendering` напрямую и вызывает `RefreshRendering()` без предварительного чтения getter.
-
-Подробнее: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Связанный проект
 
 **MPC184 Viewer:** https://github.com/maximofflove/MPC184Viewer
 
-SpaceClaim Weld Namer подготавливает пары `wNa / wNb`, после чего MPC184 Viewer используется в Mechanical для создания, проверки, визуализации и обработки MPC184 сварных связей.
+Weld mode подготавливает пары `wNa / wNb` для дальнейшего workflow в Mechanical.
 
 ## Лицензия
 
@@ -215,6 +226,6 @@ GNU General Public License v3.0. См. [LICENSE](LICENSE).
 
 ## Поддержка
 
-Программа полностью бесплатная и open source. Добровольная поддержка разработки:
+Проект бесплатный и open source. Добровольная поддержка:
 
 **https://boosty.to/ansys2021/donate**

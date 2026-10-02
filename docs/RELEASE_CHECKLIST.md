@@ -36,8 +36,8 @@
 
 ## Packaging
 
-- [x] Source header = v0.13.1.
-- [x] Window titles = v0.13.1.
+- [x] Source header = v0.14.1.
+- [x] Window titles = v0.14.1.
 - [x] Log file = `%TEMP%\\SpaceClaim_Weld_Namer_v012.log`.
 - [x] README / README_RU / CHANGELOG / RELEASE_NOTES updated.
 - [x] Real validation distinguished from static checks.
@@ -57,7 +57,18 @@
 Recommended metadata:
 
 ```text
-Tag:    v0.13.1
+Tag:    v0.15.8
 Target: main
-Title:  SpaceClaim Named Selection Namer v0.13.1
+Title:  SpaceClaim Named Selection Namer v0.15.8
 ```
+
+## v0.15.8 Contact Repair
+
+- [x] Contact manager enabled for `ctkt` mode.
+- [x] Add / Remove / Replace use `NamedSelection.Replace(...)` and post-operation verification.
+- [x] Contact repair rejects non-Face selections.
+- [x] Weld routing remains separate and unchanged.
+- [x] Runtime-test Contact QA / Repair Manager in SpaceClaim 2021 R1 / API V19 — user confirmed it works.
+- [x] Capture a real Contact mutation — `Add to B` updated `ctkt37b` to 8 Faces and revalidated the pair.
+- [x] Promote v0.15.8 from TEST to stable after target-host confirmation.
+

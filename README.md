@@ -1,162 +1,183 @@
 # SpaceClaim Named Selection Namer
 
-A semi-automatic Named Selection tool for welds, bolt joints and Mechanical Face Meshing in **SpaceClaim 2021 R1 / API V19 / IronPython 2.7**. Weld groups also have QA and repair controls.
+Semi-automatic preparation, checking and repair of Named Selections for **ANSYS SpaceClaim 2021 R1 / Script API V19 / IronPython 2.7**.
 
-**Current release: v0.13.1**
+**Current stable release: v0.15.8**
 
-> SpaceClaim script for the Script Editor. It is not an ACT extension or DLL.
+The tool keeps geometry selection under engineering control while automating naming, visualization, QA and controlled repair around four purposes:
 
-## Name sequences
-
-| Purpose | Geometry | Sequence | Highlight |
+| Purpose | Geometry | Sequence | Visualization |
 | --- | --- | --- | --- |
-| Weld Pair | Faces or Edges | `w1a`, `w1b` … `w99999999b` | A blue, B red |
-| Bolt Pair | Edges | `f1a`, `f1b` … `f999999b` | A blue, B red |
-| Mechanical Face Meshing | Faces | `fm1` … `fm999999999` | Blue |
+| Weld pair | Faces or Edges | `w1a`, `w1b`, `w2a`, `w2b`, ... | A blue, B red |
+| Bolt pair | Edges | `f1a`, `f1b`, `f2a`, `f2b`, ... | A blue, B red |
+| Face Meshing | Faces | `fm1`, `fm2`, ... | blue |
+| Contact pair | Faces only | `ctkt1a`, `ctkt1b`, `ctkt2a`, `ctkt2b`, ... | A muted blue, B sand |
 
-Select geometry and press **Create Next**. All selected items enter one group. Naming is case insensitive, fills gaps independently for each purpose and leaves existing groups intact. **Check Next Name** shows the next name in the selected mode. Auto highlight, Highlight Current and Highlight All follow the selected purpose; **Clear Highlight** removes the temporary colors. Weld QA / Repair applies only to `w` groups.
+> This is a SpaceClaim Script Editor tool, not an ACT extension or DLL.
 
-The user confirmed Bolt Pair and Face Meshing creation and highlighting in SpaceClaim 2021 R1. See [validation scope](docs/VALIDATION.md) for details.
+## What is new in v0.15.8
 
-## Interface screenshots — v0.13.1
+`Contact pair (ctkt)` now uses the same controlled QA / Repair workflow as Weld pairs. For a selected contact pair you can **Replace**, **Add**, **Remove**, or **Create Missing** geometry independently on side A or B. Contact repair is intentionally **Faces only**. After a mutation, the group is re-read and checked before the table is refreshed.
 
-Real screenshots from SpaceClaim 2021 R1.
+The update preserves the v0.15.7 color scheme: weld and bolt pairs use blue/red; Face Meshing uses blue; contact pairs use muted-blue/sand.
 
-**Weld Pair** — sequential weld groups and current pair:
+See [RELEASE_NOTES.md](RELEASE_NOTES.md) and [CHANGELOG.md](CHANGELOG.md).
 
-![Weld Pair mode in v0.13.1](docs/images/v0131_weld_pair_window.png)
+## Interface screenshots
 
-**Bolt Pair** — Edge groups `fNa/fNb`:
+The screenshots below are real images from the SpaceClaim 2021 R1 workflow. The Weld, Bolt and Face Meshing images were captured with v0.15.7; the Contact images were captured with the final v0.15.8 build after runtime verification of the new Contact QA / Repair workflow.
 
-![Bolt Pair mode in v0.13.1](docs/images/v0131_bolt_pair_window.png)
+### Weld pair
 
-**Face Meshing** — Face groups `fmN`:
+Main Weld window with the v0.15.7 controls and real-model group counts:
 
-![Face Meshing mode in v0.13.1](docs/images/v0131_face_meshing_window.png)
+![Weld window v0.15.7](docs/images/v0157_weld_window.png)
 
-**Weld Named Selection QA / Repair Manager** — an example screening table from the user's model. CHECK rows need review in their model context.
+Blue/red weld-pair geometry on the model:
 
-![Weld QA and Repair Manager in v0.13.1](docs/images/v0131_weld_qa_repair_manager.png)
+![Weld highlight v0.15.7](docs/images/v0157_weld_highlight.png)
 
-## Why this tool exists
+QA / Repair Manager with validation table and Add/Remove/Replace/Create Missing controls:
 
-The utility was created for large detailed structural submodels containing many welded joints. In this workflow every weld is prepared as a pair of Named Selections:
+![Weld QA Repair](docs/images/v0157_weld_qa_repair.png)
+
+### Bolt pair
+
+Bolt mode after checking existing pairs:
+
+![Bolt window v0.15.7](docs/images/v0157_bolt_window.png)
+
+Current-pair A/B highlighting:
+
+![Bolt pair highlight](docs/images/v0157_bolt_pair_highlight.png)
+
+All Bolt groups highlighted:
+
+![Bolt all highlight](docs/images/v0157_bolt_all_highlight.png)
+
+### Face Meshing
+
+Face Meshing mode and existing-group audit controls:
+
+![Face Meshing window v0.15.7](docs/images/v0157_face_meshing_window.png)
+
+Example Face Meshing geometry on the model:
+
+![Face Meshing model](docs/images/v0157_face_meshing_model.png)
+
+### Contact pair
+
+Final v0.15.8 Contact mode with the active Contact QA / Repair Manager button:
+
+![Contact window v0.15.8](docs/images/v0158_contact_window.png)
+
+Contact QA / Repair Manager running on real `ctkt` groups. The captured session shows **Add to B** updating `ctkt37b` to 8 Faces followed by automatic revalidation:
+
+![Contact QA Repair v0.15.8](docs/images/v0158_contact_qa_repair.png)
+
+Older validated screenshots are retained in `docs/images/` for development history and comparison.
+
+## Quick start
+
+1. Open the model in SpaceClaim and activate the **root component / root part**.
+2. Open `Weld_Namer.py` in the SpaceClaim Script Editor.
+3. Select **API V19** and run the complete script.
+4. Choose the required **Group purpose**.
+5. Select the model geometry.
+6. Press **Create Next**.
+7. Use the highlight / audit / QA controls for the selected purpose.
+8. For Weld or Contact pairs, open the **Named Selection QA / Repair Manager** for controlled corrections.
+
+The log is written to:
 
 ```text
-w1a / w1b
-w2a / w2b
-w3a / w3b
-...
+%TEMP%\SpaceClaim_Weld_Namer_v012.log
 ```
 
-Manually creating, naming and checking dozens or hundreds of these pairs becomes repetitive and easy to get wrong. SpaceClaim Weld Namer keeps the engineering decision with the user — the engineer selects the real geometry — while automating the naming, bookkeeping, visualization and QA around it.
+## Main-window controls
 
-The Named Selections can then be transferred to **ANSYS Mechanical** and used with the companion **MPC184 Viewer** workflow.
+The full explanation of every control is in **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)**. The most important controls are summarized here:
 
-## Main workflow
+| Control | What it does |
+| --- | --- |
+| **Group purpose** | Switches between Weld, Bolt, Face Meshing and Contact workflows. Each purpose has an independent naming sequence. |
+| **Selection type** | Selects Edges/Faces where the purpose allows it. Bolt is Edge-only; Face Meshing and Contact are Face-only. |
+| **Create Next** | Creates the first free valid name for the selected purpose. Existing groups are not overwritten. |
+| **Check Next Name** | Reads existing groups and reports the next name without changing the model. |
+| **Auto highlight after Create** | Highlights the newly created pair/group immediately after successful creation. |
+| **Show names of highlighted Named Selections** | Draws temporary model-space labels for highlighted groups. |
+| **Label size (%)** | Scales temporary labels; it does not change CAD geometry. |
+| **Bolt axis tolerance (degrees)** | Tolerance used by the Bolt pair axis screening. Default: 1 degree. |
+| **Highlight Current Pair / Group** | Highlights the current logical pair/group for the active purpose. |
+| **Highlight All ...** | Highlights every group belonging to the active purpose. |
+| **Clear Highlight** | Clears pair colors, labels and QA problem overlays. |
+| **Weld / Contact QA / Repair Manager** | Opens pair QA, navigation, CSV export and controlled repair. |
+| **Check Existing Bolt Pairs** | Read-only audit of existing Bolt pair geometry and axis alignment. |
+| **Check Existing Face Meshing** | Read-only audit for faces reused by multiple `fm` groups. |
+| **Find Groups for Selected Geometry** | Reports which active-purpose groups contain the currently selected geometry. |
 
-```text
-Select weld geometry in SpaceClaim
-        ↓
-Create Next
-        ↓
-wNa / wNb Named Selections
-        ↓
-A side = blue, B side = red
-        ↓
-QA / Repair Manager
-        ↓
-ANSYS Mechanical
-        ↓
-MPC184 Viewer
-```
+## QA / Repair Manager
 
-## Weld workflow inherited from v0.12.0
+The manager is available for **Weld pairs** and, from v0.15.8, **Contact pairs**. It provides:
 
-### Sequential Named Selection creation
+- pair table with A/B names, geometry types, object counts, metric difference, status and reason;
+- **Validate All** and **Show Problems Only**;
+- orange **Highlight Problems** / **Clear Problem Highlight**;
+- **Previous Problem / Next Problem** navigation;
+- **Highlight Selected Pair** and **Zoom Selected Pair**;
+- **Export CSV**;
+- controlled repair using the current SpaceClaim primary selection:
+  - **Replace A / Replace B**;
+  - **Add to A / Add to B**;
+  - **Remove from A / Remove from B**;
+  - **Create Missing A / Create Missing B**;
+  - **Highlight Conflict**.
 
-The first free name is determined automatically:
+For Contact pairs, all repair input must be **Faces**. A removal operation is blocked if it would leave the Named Selection empty. Every mutation asks for confirmation, uses the V19 `NamedSelection.Replace(...)` path for existing groups, re-reads the result and revalidates the pair.
 
-```text
-w1a -> w1b -> w2a -> w2b -> ... -> w99999999b
-```
+QA is a geometry/model-preparation screen, **not** an engineering acceptance calculation for a weld, bolt or contact definition.
 
-- case-insensitive existing-name detection;
-- gaps are filled automatically;
-- several selected edges or faces can be stored in one group;
-- normal creation does not overwrite existing weld groups;
-- numbering is recalculated from the actual root-part groups every time.
+## Purpose-specific behavior
 
-### Independent A/B visualization
+### Weld pair (`w`)
 
-- `w...a` is shown with the proven SpaceClaim **Secondary Selection** highlight (blue on the tested installation);
-- `w...b` is drawn as a temporary **red `Display.Graphic`** overlay;
-- CAD/body colors are not modified;
-- `Highlight Current Pair`, `Highlight All Weld Groups` and Auto Highlight use the same A/B convention;
-- `Clear Highlight` clears both visualization channels.
+- sequence is case-insensitive and fills gaps;
+- supports Faces or Edges;
+- several selected objects may belong to one side;
+- A/B visualization uses blue/red;
+- QA checks missing/empty groups, geometry type consistency, A/B reuse, external reuse, duplicate names, sequence gaps, and length/area mismatch;
+- object-count mismatch is information only.
 
-![A/B weld pair highlight](docs/images/v012_ab_pair_highlight.png)
+### Bolt pair (`f`)
 
-### Named Selection QA Manager
+- Edge-only;
+- expects one complete circular hole rim per side;
+- the first side can remain **PENDING** until its counterpart exists;
+- completed pairs are checked against the adjacent planar plate normals;
+- default axis tolerance is 1 degree;
+- **Check Existing Bolt Pairs** reports OK / ERROR / INCOMPLETE without modifying the groups.
 
-The QA Manager scans weld groups and presents them as pairs in a table.
+### Face Meshing (`fm`)
 
-Checks include:
+- Face-only;
+- creation stops if any selected face already belongs to another `fm` group;
+- **Check Existing Face Meshing** audits existing groups and highlights overlaps;
+- the audit is read-only.
 
-- missing `A` or `B` side;
-- empty/unresolved Named Selection;
-- mixed or unsupported geometry type;
-- A/B type mismatch;
-- the same geometry used in both A and B;
-- geometry reused by another weld group;
-- duplicate group names ignoring case;
-- sequence gaps;
-- edge-length / face-area mismatch above the screening tolerance (default 10%).
+### Contact pair (`ctkt`)
 
-A/B object-count difference is displayed as **information**, not automatically treated as an error, because one physical weld side may be partitioned into a different number of topological edges/faces.
+- Face-only;
+- sequential A/B pair creation;
+- muted-blue/sand visualization to distinguish contacts from weld/bolt pairs;
+- optional temporary labels and selected-geometry lookup;
+- v0.15.8 adds Contact QA / Repair Manager with the same controlled mutation workflow as Weld pairs;
+- the tool creates and manages Named Selections only. Contact/Target assignment and Mechanical contact properties remain separate Mechanical tasks.
 
-Available review functions include:
+## Validation status
 
-- **Validate All**;
-- **Show Problems Only**;
-- **Highlight Problems** in orange;
-- **Previous Problem / Next Problem**;
-- **Highlight Selected Pair**;
-- **Zoom Selected Pair**;
-- **Export CSV**.
+The stable weld workflow was validated on the real target installation: **SpaceClaim 2021 R1 / API V19 / IronPython 2.7**. Earlier validation included a large Edge-based weld model, A/B visualization, QA and controlled repair.
 
-![QA / Repair Manager](docs/images/v012_qa_repair_manager.png)
-
-> QA status is a geometry/model-preparation screening result. It is not an engineering weld acceptance assessment.
-
-### Controlled Repair Manager
-
-The selected weld pair can be repaired using the current SpaceClaim primary selection:
-
-- **Replace A / Replace B**;
-- **Add to A / Add to B**;
-- **Remove from A / Remove from B**;
-- **Create Missing A / Create Missing B**;
-- **Highlight Conflict** for reused geometry.
-
-Repair operations validate the selected geometry type, request confirmation, execute the mutation, re-read the Named Selection and verify the resulting geometry before the QA table is refreshed.
-
-Existing Named Selections are changed with the V19 scripting command `NamedSelection.Replace(...)`; `Group.Members` is deliberately treated as read-only.
-
-## Real SpaceClaim validation
-
-v0.12.0 was promoted from the test build after successful use on the real target installation:
-
-- **ANSYS SpaceClaim 2021 R1**;
-- **Script API V19**;
-- built-in **IronPython 2.7**;
-- large Edge-based weld model;
-- at least **104 weld Named Selection groups / 346 geometry items** exercised by the global highlight during the validation session;
-- A/B blue/red visualization confirmed;
-- QA / Repair Manager opened and operated successfully;
-- repair workflow reported by the user as working successfully.
-
-Faces support is implemented, including face-area QA and red boundary rendering, but the public validation claim for v0.12.0 remains primarily the real **Edges** workflow unless separately tested.
+For v0.15.8, local regression checks pass: **23 tests total** (16 Bolt geometry/mutation-guard tests + 7 Contact repair routing/static tests). The new Contact QA / Repair path was then runtime-tested by the user in **SpaceClaim 2021 R1 / API V19**. The supplied validation capture shows `Add to B` updating `ctkt37b` to 8 Faces and the pair being revalidated immediately afterward. v0.15.8 is therefore published as the current stable release.
 
 See [docs/VALIDATION.md](docs/VALIDATION.md).
 
@@ -165,47 +186,9 @@ See [docs/VALIDATION.md](docs/VALIDATION.md).
 - ANSYS SpaceClaim **2021 R1**
 - Script API **V19**
 - built-in **IronPython 2.7**
-- root component / root part active when creating or repairing weld groups
+- root component / root part active for creation and repair
 
 Other SpaceClaim versions may work, but are not claimed as validated by this release.
-
-## Quick start
-
-1. Open the SpaceClaim model and activate the **root component**.
-2. Open `Weld_Namer.py` in the SpaceClaim Script Editor.
-3. Select **API V19**.
-4. Run the complete script.
-5. Choose `Edges` or `Faces`.
-6. Select geometry and click **Create Next**.
-7. Use **Named Selection QA / Repair Manager** to validate, navigate, highlight and repair weld pairs.
-
-The stable log is written to:
-
-```text
-%TEMP%\SpaceClaim_Weld_Namer_v012.log
-```
-
-## Important API behavior retained from validation
-
-The normal creation chain remains intentionally conservative:
-
-```text
-Selection.GetActive()
-NamedSelection.GetGroups(root)
-NamedSelection.Create(selection, Selection.Empty())
-NamedSelection.Rename(temporary_name, target)
-```
-
-Important target-installation observations:
-
-- `Part.Groups` is not available in the tested environment;
-- `NamedSelection.GetGroups(root)` is used explicitly;
-- parameterless `NamedSelection.GetGroups()` previously failed from the modeless callback;
-- the WinForms UI is launched on the SpaceClaim UI thread through `BeginInvoke`;
-- AppDomain state + `Monitor` prevent duplicate windows during repeated script runs;
-- `Window.Rendering` getter can throw while the custom rendering slot is empty, therefore the stable overlay path writes the property directly and refreshes the window without reading the getter first.
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Repository layout
 
@@ -220,25 +203,24 @@ SpaceClaim-Weld-Namer/
 ├── LICENSE
 ├── SUPPORT.md
 ├── docs/
+│   ├── USER_GUIDE.md
+│   ├── USER_GUIDE_RU.md
 │   ├── ARCHITECTURE.md
 │   ├── VALIDATION.md
 │   ├── RELEASE_CHECKLIST.md
 │   ├── DEVELOPMENT_NOTES.md
 │   └── images/
+├── tests/
+│   ├── test_bolt_geometry.py
+│   └── test_contact_repair_static.py
 └── tools/
-    ├── API_Diagnostics.py
-    ├── Allow_Reopen.py
-    ├── Create_Next_Once.py
-    ├── Weld_Highlight_API_Diagnostics.py
-    ├── Weld_Highlight_API_Diagnostics_v2.py
-    └── Weld_NamedSelection_Repair_API_Diagnostics.py
 ```
 
 ## Companion project
 
 **MPC184 Viewer:** https://github.com/maximofflove/MPC184Viewer
 
-SpaceClaim Weld Namer prepares `wNa / wNb` geometry groups; MPC184 Viewer uses the downstream Mechanical model to create, validate, visualize and post-process MPC184 weld connections.
+The Weld mode prepares `wNa / wNb` geometry groups for the downstream Mechanical workflow.
 
 ## License
 
@@ -246,6 +228,6 @@ GNU General Public License v3.0. See [LICENSE](LICENSE).
 
 ## Support
 
-The project is completely free and open source. Optional voluntary support:
+The project is free and open source. Optional voluntary support:
 
 **https://boosty.to/ansys2021/donate**
